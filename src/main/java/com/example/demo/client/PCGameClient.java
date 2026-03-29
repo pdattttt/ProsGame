@@ -25,7 +25,7 @@ import java.util.concurrent.ThreadLocalRandom;
 
 public class PCGameClient extends Application {
 
-    private static final int WIDTH = 1200, HEIGHT = 750;
+    private static final int WIDTH = 1125, HEIGHT = 750;
     private static final int LEVEL_DURATION_SECONDS = 180;
     private static final long BUILD_COOLDOWN_MS = 1500;
 
@@ -92,7 +92,7 @@ public class PCGameClient extends Application {
     public static void main(String[] args) { launch(args); }
     // Load các tài nguyên trong game
     private void loadResources() {
-        String[] imgNames = { "tower_archer", "tower_mage", "tower_barracks", "tower_cannon", "monster_goblin", "monster_orc", "monster_shaman", "monster_boss", "base_core", "bg_neon" };
+        String[] imgNames = { "tower_archer", "tower_mage", "tower_barracks", "tower_cannon", "monster_goblin", "monster_orc", "monster_shaman", "monster_boss", "base_core", "bg_neon" , "map_1"};
         for (String name : imgNames) {
             try {
                 Image img = new Image(getClass().getResourceAsStream("/static/images/" + name + ".png"));
@@ -169,6 +169,8 @@ public class PCGameClient extends Application {
         gc = canvas.getGraphicsContext2D();
 
         canvas.setOnMouseClicked(e -> {
+            //Test lấy tọa độ
+            System.out.println("state.currentPath.add(new Point2D(" + (int)e.getX() + ", " + (int)e.getY() + "));");
             if ("DEFENDER".equals(state.myRole) && !state.isGameOver && !state.isPaused && !state.isVictory) {
                 if (e.getButton() == MouseButton.PRIMARY) {
                     Tower existing = state.towers.stream().filter(t -> t.dist(e.getX(), e.getY()) < 40).findFirst().orElse(null);
@@ -214,7 +216,7 @@ public class PCGameClient extends Application {
             }
         }.start();
 
-        stage.setTitle("Kingdom Rush: Ultimate Edition");
+        stage.setTitle("KINGDOM");
         stage.setScene(scene); stage.show();
     }
 
@@ -272,9 +274,42 @@ public class PCGameClient extends Application {
 
     private void generateMap() {
         state.currentPath.clear();
-        state.currentPath.add(new Point2D(0, ThreadLocalRandom.current().nextDouble(150, HEIGHT-200)));
-        for(int i=1; i<5; i++) state.currentPath.add(new Point2D((WIDTH/5.0)*i, ThreadLocalRandom.current().nextDouble(150, HEIGHT-200)));
-        state.currentPath.add(new Point2D(WIDTH-120, ThreadLocalRandom.current().nextDouble(150, HEIGHT-200)));
+        state.currentPath.add(new Point2D(99, 654));
+        state.currentPath.add(new Point2D(70, 592));
+        state.currentPath.add(new Point2D(35, 563));
+        state.currentPath.add(new Point2D(11, 518));
+        state.currentPath.add(new Point2D(5, 478));
+        state.currentPath.add(new Point2D(21, 428));
+        state.currentPath.add(new Point2D(75, 410));
+        state.currentPath.add(new Point2D(138, 417));
+        state.currentPath.add(new Point2D(186, 440));
+        state.currentPath.add(new Point2D(233, 472));
+        state.currentPath.add(new Point2D(293, 493));
+        state.currentPath.add(new Point2D(376, 494));
+        state.currentPath.add(new Point2D(438, 467));
+        state.currentPath.add(new Point2D(469, 412));
+        state.currentPath.add(new Point2D(448, 348));
+        state.currentPath.add(new Point2D(388, 317));
+        state.currentPath.add(new Point2D(329, 269));
+        state.currentPath.add(new Point2D(327, 214));
+        state.currentPath.add(new Point2D(390, 162));
+        state.currentPath.add(new Point2D(489, 151));
+        state.currentPath.add(new Point2D(590, 150));
+        state.currentPath.add(new Point2D(663, 172));
+        state.currentPath.add(new Point2D(693, 208));
+        state.currentPath.add(new Point2D(706, 256));
+        state.currentPath.add(new Point2D(689, 293));
+        state.currentPath.add(new Point2D(668, 340));
+        state.currentPath.add(new Point2D(640, 399));
+        state.currentPath.add(new Point2D(638, 443));
+        state.currentPath.add(new Point2D(707, 456));
+        state.currentPath.add(new Point2D(807, 442));
+        state.currentPath.add(new Point2D(879, 411));
+        state.currentPath.add(new Point2D(959, 412));
+        state.currentPath.add(new Point2D(1028, 469));
+        state.currentPath.add(new Point2D(1008, 550));
+        state.currentPath.add(new Point2D(948, 620));
+        state.currentPath.add(new Point2D(945, 664));
     }
 
     private void syncMapToAttacker() {
@@ -296,12 +331,15 @@ public class PCGameClient extends Application {
     }
 
     private boolean isValidBuildSpot(double x, double y) {
-        for (Tower t : state.towers) { if (t.dist(x, y) > 0 && t.dist(x, y) < 40) return false; }
-        if (y > HEIGHT - 90) return false;
-        if (state.selectedTower == TowerType.BARRACKS) return true;
+        for (Tower t : state.towers) { if (t.dist(x, y) > 0 && t.dist(x, y) < 40) return false; } // Cấm đè lên trụ khác
+        if (y > HEIGHT - 90) return false; // Cấm đè lên thanh Shop
+
+        if (state.selectedTower == TowerType.BARRACKS) return true; // Trụ lính (Barracks) được phép thả lính ra đường
+
+        // KIỂM TRA CẤM XÂY TRÊN ĐƯỜNG ĐẤT (Bán kính 85px)
         for (int i = 0; i < state.currentPath.size() - 1; i++) {
             Point2D p1 = state.currentPath.get(i), p2 = state.currentPath.get(i+1);
-            if (distToSegment(x, y, p1.getX(), p1.getY(), p2.getX(), p2.getY()) < 45) return false;
+            if (distToSegment(x, y, p1.getX(), p1.getY(), p2.getX(), p2.getY()) < 85) return false;
         }
         return true;
     }
@@ -556,7 +594,7 @@ public class PCGameClient extends Application {
             double dx = (Math.random() - 0.5) * screenShake; double dy = (Math.random() - 0.5) * screenShake; gc.translate(dx, dy);
         }
 
-        Image bgImg = imageCache.get("bg_neon");
+        Image bgImg = imageCache.get("map_1");
         if(bgImg != null) gc.drawImage(bgImg, 0, 0, WIDTH, HEIGHT);
         else {
             gc.setFill(new LinearGradient(0, 0, 1, 1, true, CycleMethod.NO_CYCLE, new Stop(0, BG_DARK), new Stop(1, BG_LIGHT))); gc.fillRect(0, 0, WIDTH, HEIGHT);
@@ -569,9 +607,9 @@ public class PCGameClient extends Application {
         Color[] stageColors = {NEON_CYAN, NEON_PURPLE, NEON_ORANGE, NEON_GREEN, NEON_RED};
         Color currentMapColor = stageColors[(state.currentLevel - 1) % stageColors.length];
 
-        gc.setLineCap(StrokeLineCap.ROUND); gc.setLineJoin(StrokeLineJoin.ROUND); gc.setEffect(new DropShadow(20, currentMapColor));
-        gc.setStroke(currentMapColor); gc.setLineWidth(60); gc.beginPath(); gc.moveTo(state.currentPath.get(0).getX(), state.currentPath.get(0).getY()); for(Point2D p : state.currentPath) gc.lineTo(p.getX(), p.getY()); gc.stroke();
-        gc.setEffect(null); gc.setStroke(ROAD_COLOR); gc.setLineWidth(50); gc.beginPath(); gc.moveTo(state.currentPath.get(0).getX(), state.currentPath.get(0).getY()); for(Point2D p : state.currentPath) gc.lineTo(p.getX(), p.getY()); gc.stroke();
+//        gc.setLineCap(StrokeLineCap.ROUND); gc.setLineJoin(StrokeLineJoin.ROUND); gc.setEffect(new DropShadow(20, currentMapColor));
+//        gc.setStroke(currentMapColor); gc.setLineWidth(60); gc.beginPath(); gc.moveTo(state.currentPath.get(0).getX(), state.currentPath.get(0).getY()); for(Point2D p : state.currentPath) gc.lineTo(p.getX(), p.getY()); gc.stroke();
+//        gc.setEffect(null); gc.setStroke(ROAD_COLOR); gc.setLineWidth(50); gc.beginPath(); gc.moveTo(state.currentPath.get(0).getX(), state.currentPath.get(0).getY()); for(Point2D p : state.currentPath) gc.lineTo(p.getX(), p.getY()); gc.stroke();
 
         Point2D end = state.currentPath.get(state.currentPath.size()-1); drawBase(end.getX(), end.getY());
 
