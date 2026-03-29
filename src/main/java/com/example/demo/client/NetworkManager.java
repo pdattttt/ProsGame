@@ -11,7 +11,8 @@ import org.springframework.web.socket.messaging.WebSocketStompClient;
 import java.lang.reflect.Type;
 import java.util.function.Consumer;
 
-public class NetworkManager {
+public class
+NetworkManager {
     private StompSession session;
     private String serverUrl = "ws://localhost:8080/ws-game";
     private Consumer<GameAction> onActionReceived;

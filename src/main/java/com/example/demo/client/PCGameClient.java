@@ -18,7 +18,7 @@ import javafx.stage.Stage;
 import javafx.scene.image.Image;
 
 // IMPORT THƯ VIỆN ÂM THANH
-import javafx.scene.media.AudioClip;
+import javafx.scene.media.*;
 
 import java.util.*;
 import java.util.concurrent.ThreadLocalRandom;
@@ -53,6 +53,14 @@ public class PCGameClient extends Application {
     private double bombFlashAlpha = 0;
     private double screenShake = 0;
 
+
+    // --- QUẢN LÝ NHẠC NỀN (BGM) ---
+    private MediaPlayer homeBgmPlayer;
+    private MediaPlayer gameBgmPlayer;
+    private MediaPlayer endgameBgmPlayer;
+    private MediaPlayer victoryBgmPlayer;
+    private String currentBgm = "";
+
     private class DamageText {
         double x, y; String text; Color color; double life = 1.0;
         DamageText(double x, double y, String text, Color color) {
@@ -79,11 +87,10 @@ public class PCGameClient extends Application {
     }
 
     private Map<String, Image> imageCache = new HashMap<>();
-    // BỘ NHỚ ĐỆM ÂM THANH
     private Map<String, AudioClip> soundCache = new HashMap<>();
 
     public static void main(String[] args) { launch(args); }
-
+    // Load các tài nguyên trong game
     private void loadResources() {
         String[] imgNames = { "tower_archer", "tower_mage", "tower_barracks", "tower_cannon", "monster_goblin", "monster_orc", "monster_shaman", "monster_boss", "base_core", "bg_neon" };
         for (String name : imgNames) {
@@ -99,14 +106,53 @@ public class PCGameClient extends Application {
             try {
                 AudioClip clip = new AudioClip(getClass().getResource("/static/sounds/" + name + ".wav").toExternalForm());
                 soundCache.put(name, clip);
-            } catch (Exception e) {} // Lỗi thiếu file thì tự động bỏ qua
+            } catch (Exception e) {}
         }
-    }
 
+        // LOAD NHẠC NỀN (MEDIA PLAYER)
+        try {
+            homeBgmPlayer = new MediaPlayer(new Media(getClass().getResource("/static/sounds/homesound.wav").toExternalForm()));
+            homeBgmPlayer.setCycleCount(MediaPlayer.INDEFINITE); // Lặp vô hạn
+            homeBgmPlayer.setVolume(0.3); // Âm lượng 30%
+        } catch (Exception e) { System.out.println("Thiếu file homesound.wav"); }
+        try {
+            gameBgmPlayer = new MediaPlayer(new Media(getClass().getResource("/static/sounds/gamesound.wav").toExternalForm()));
+            gameBgmPlayer.setCycleCount(MediaPlayer.INDEFINITE); // Lặp vô hạn
+            gameBgmPlayer.setVolume(0.25);
+        } catch (Exception e) { System.out.println("Thiếu file gamesound.wav"); }
+        try {
+            endgameBgmPlayer = new MediaPlayer(new Media(getClass().getResource("/static/sounds/untilendgame.wav").toExternalForm()));
+            endgameBgmPlayer.setCycleCount(MediaPlayer.INDEFINITE); // Lặp vô hạn
+            endgameBgmPlayer.setVolume(0.25);
+        } catch (Exception e) { System.out.println("Thiếu file untilendgame.wav"); }
+
+        try {
+            victoryBgmPlayer = new MediaPlayer(new Media(getClass().getResource("/static/sounds/victory.wav").toExternalForm()));
+            victoryBgmPlayer.setCycleCount(1);
+            victoryBgmPlayer.setVolume(0.4);
+        } catch (Exception e) { System.out.println("Thiếu file victory.wav"); }
+    }
+    // HÀM ĐIỀU KHIỂN CHUYỂN BÀI NHẠC NỀN MƯỢT MÀ
+    private void playBgm(String type) {
+        if (currentBgm.equals(type)) return;
+        currentBgm = type;
+
+        // Dừng tất cả nhạc đang phát
+        if (homeBgmPlayer != null) homeBgmPlayer.stop();
+        if (gameBgmPlayer != null) gameBgmPlayer.stop();
+        if (endgameBgmPlayer != null) endgameBgmPlayer.stop();
+        if (victoryBgmPlayer != null) victoryBgmPlayer.stop();
+
+        // Bật đúng bài được yêu cầu
+        if ("HOME".equals(type) && homeBgmPlayer != null) homeBgmPlayer.play();
+        else if ("GAME".equals(type) && gameBgmPlayer != null) gameBgmPlayer.play();
+        else if ("ENDGAME".equals(type) && endgameBgmPlayer != null) endgameBgmPlayer.play();
+        else if ("VICTORY".equals(type) && victoryBgmPlayer != null) victoryBgmPlayer.play();
+    }
     // HÀM PHÁT ÂM THANH
     private void playSound(String name) {
         AudioClip clip = soundCache.get(name);
-        if (clip != null) clip.play(0.4); // Phát âm thanh với âm lượng 40% để không chát tai
+        if (clip != null) clip.play(0.4); // Phát âm thanh 40% để không chói tai
     }
 
     private void spawnExplosion(double x, double y, Color c, int count) {
@@ -174,6 +220,7 @@ public class PCGameClient extends Application {
 
     // ================= MENUS =================
     private void showMainMenu() {
+        playBgm("HOME"); // NHẠC MENU
         rootPane.getChildren().removeIf(node -> node instanceof VBox || node instanceof HBox);
         VBox menu = new VBox(30); menu.setAlignment(Pos.CENTER); menu.setStyle("-fx-background-color: rgba(0,0,0,0.95);");
         Label title = new Label("NEON KINGDOM"); title.setTextFill(NEON_CYAN); title.setFont(Font.font("Impact", 80)); title.setEffect(new DropShadow(20, NEON_CYAN));
@@ -202,6 +249,7 @@ public class PCGameClient extends Application {
     }
 
     private void startGame(boolean offline, String role) {
+        playBgm("GAME"); //BẬT NHẠC GAME
         state.isOfflineMode = offline; state.myRole = role;
         state.resetLevelData(); state.gold = 500; waveManager.initWaves(); state.currentLevel = 1;
         damageTexts.clear(); particles.clear(); screenShake = 0; bombFlashAlpha = 0;
@@ -262,7 +310,10 @@ public class PCGameClient extends Application {
     private void updateLogic(long now) {
         if (state.isVictory) { handleVictory(); return; }
         if (state.isGameOver) { handleDefeat(); return; }
-
+        // Wave 4 trở đi, đổi sang nhạc Dồn dập
+        if (state.currentLevel >= 4 && !currentBgm.equals("ENDGAME")) {
+            playBgm("ENDGAME");
+        }
         if (!(state.isOfflineMode && "DEFENDER".equals(state.myRole))) {
             long elapsed = (System.currentTimeMillis() - state.levelStartTime) / 1000;
             if (LEVEL_DURATION_SECONDS - elapsed <= 0) {
@@ -459,6 +510,7 @@ public class PCGameClient extends Application {
     }
     private void handleVictory() {
         state.isVictory = true;
+        playBgm("VICTORY"); // <--- THÊM DÒNG NÀY ĐỂ ĐỔI NHẠC KHI WIN
         if (!state.isOfflineMode) network.sendAction(state.myRole, "VICTORY", "");
         Platform.runLater(() -> showEndGameMenu(true));
     }
