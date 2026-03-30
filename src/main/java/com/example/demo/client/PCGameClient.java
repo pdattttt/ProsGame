@@ -61,6 +61,19 @@ public class PCGameClient extends Application {
     private MediaPlayer victoryBgmPlayer;
     private String currentBgm = "";
 
+
+    private class SpriteSheet {
+        Image sheet;
+        int frameCount;
+        public SpriteSheet(Image sheet, int frameCount) {
+            this.sheet = sheet;
+            this.frameCount = frameCount;
+        }
+    }
+    // Bộ nhớ đệm cho Animation
+    private Map<String, SpriteSheet> animCache = new HashMap<>();
+
+
     private class DamageText {
         double x, y; String text; Color color; double life = 1.0;
         DamageText(double x, double y, String text, Color color) {
@@ -92,7 +105,7 @@ public class PCGameClient extends Application {
     public static void main(String[] args) { launch(args); }
     // Load các tài nguyên trong game
     private void loadResources() {
-        String[] imgNames = { "tower_archer", "tower_mage", "tower_barracks", "tower_cannon", "monster_goblin", "monster_orc", "monster_shaman", "monster_boss", "base_core", "bg_neon" , "map_1"};
+        String[] imgNames = { "tower_archer", "tower_mage", "tower_barracks", "tower_cannon", "monster_goblin", "monster_orc", "monster_shaman", "monster_boss", "base_core", "bg_neon" , "map_1", "soldier"};
         for (String name : imgNames) {
             try {
                 Image img = new Image(getClass().getResourceAsStream("/static/images/" + name + ".png"));
@@ -131,6 +144,12 @@ public class PCGameClient extends Application {
             victoryBgmPlayer.setCycleCount(1);
             victoryBgmPlayer.setVolume(0.4);
         } catch (Exception e) { System.out.println("Thiếu file victory.wav"); }
+        try {
+            animCache.put("archer_idle", new SpriteSheet(new Image(getClass().getResourceAsStream("/static/images/Archer_Idle.png")), 6));
+            animCache.put("archer_run", new SpriteSheet(new Image(getClass().getResourceAsStream("/static/images/Archer_Run.png")), 6));
+            animCache.put("archer_shoot", new SpriteSheet(new Image(getClass().getResourceAsStream("/static/images/Archer_Shoot.png")), 8));
+            imageCache.put("arrow", new Image(getClass().getResourceAsStream("/static/images/Arrow.png")));
+        } catch (Exception e) { System.out.println("Thiếu file ảnh Archer hoặc Arrow"); }
     }
     // HÀM ĐIỀU KHIỂN CHUYỂN BÀI NHẠC NỀN MƯỢT MÀ
     private void playBgm(String type) {
@@ -170,7 +189,7 @@ public class PCGameClient extends Application {
 
         canvas.setOnMouseClicked(e -> {
             //Test lấy tọa độ
-            System.out.println("state.currentPath.add(new Point2D(" + (int)e.getX() + ", " + (int)e.getY() + "));");
+            //System.out.println("state.currentPath.add(new Point2D(" + (int)e.getX() + ", " + (int)e.getY() + "));");
             if ("DEFENDER".equals(state.myRole) && !state.isGameOver && !state.isPaused && !state.isVictory) {
                 if (e.getButton() == MouseButton.PRIMARY) {
                     Tower existing = state.towers.stream().filter(t -> t.dist(e.getX(), e.getY()) < 40).findFirst().orElse(null);
@@ -633,11 +652,27 @@ public class PCGameClient extends Application {
         gc.setGlobalAlpha(1.0);
 
         gc.setEffect(new Glow(1.0));
+        Image arrowImg = imageCache.get("arrow");
         for(Projectile p : state.projectiles) {
             gc.setStroke(p.c);
-            if(p.c.equals(TowerType.MAGE.color)) { gc.setLineWidth(6); gc.strokeLine(p.sx, p.sy, p.ex, p.ey); gc.setStroke(Color.WHITE); gc.setLineWidth(2); gc.strokeLine(p.sx, p.sy, p.ex, p.ey); }
-            else if(p.c.equals(TowerType.CANNON.color)) { gc.setFill(p.c); gc.fillOval(p.sx + (p.ex-p.sx)*0.5 - 8, p.sy + (p.ey-p.sy)*0.5 - 8, 16, 16); }
-            else { gc.setLineWidth(3); gc.strokeLine(p.sx, p.sy, p.ex, p.ey); }
+            if(p.c.equals(TowerType.MAGE.color)) {
+                gc.setLineWidth(6); gc.strokeLine(p.sx, p.sy, p.ex, p.ey); gc.setStroke(Color.WHITE); gc.setLineWidth(2); gc.strokeLine(p.sx, p.sy, p.ex, p.ey);
+            } else if(p.c.equals(TowerType.CANNON.color)) {
+                gc.setFill(p.c); gc.fillOval(p.sx + (p.ex-p.sx)*0.5 - 8, p.sy + (p.ey-p.sy)*0.5 - 8, 16, 16);
+            } else {
+                // Cung Thủ: Nếu có ảnh, vẽ ảnh mũi tên bay có xoay góc cực đẹp
+                if (arrowImg != null) {
+                    double angle = Math.atan2(p.ey - p.sy, p.ex - p.sx) * 180 / Math.PI;
+                    gc.save();
+                    gc.translate(p.sx + (p.ex-p.sx)*0.5, p.sy + (p.ey-p.sy)*0.5); // Canh ở giữa đường đạn
+                    gc.rotate(angle);
+                    gc.drawImage(arrowImg, -15, -5, 30, 10);
+                    gc.restore();
+                } else {
+                    // Nếu thiếu ảnh, vẽ tạm một đường line to cho dễ nhìn
+                    gc.setLineWidth(4); gc.strokeLine(p.sx, p.sy, p.ex, p.ey);
+                }
+            }
         }
         gc.setEffect(null);
 
@@ -674,40 +709,80 @@ public class PCGameClient extends Application {
 
     private void drawBase(double x, double y) {
         Image img = imageCache.get("base_core");
-        if (img != null) { gc.setEffect(new DropShadow(20, NEON_CYAN)); gc.drawImage(img, x - 60, y - 60, 120, 120); gc.setEffect(null); }
+        if (img != null) {
+            gc.setEffect(new DropShadow(20, NEON_CYAN));
+            // Tăng chiều cao và dời tâm lên trên để Tower không bị lún xuống đất
+            gc.drawImage(img, x - 45, y - 100, 90, 130);
+            gc.setEffect(null);
+        }
         else {
             gc.setEffect(new DropShadow(15, NEON_CYAN)); gc.setFill(Color.web("#333")); gc.fillRect(x-50, y-40, 100, 80);
             gc.setFill(new LinearGradient(0,0,0,1, true, CycleMethod.NO_CYCLE, new Stop(0, NEON_CYAN), new Stop(1, Color.TRANSPARENT))); gc.fillOval(x-30, y-20, 60, 60);
             gc.save(); gc.translate(x, y+10); gc.rotate(animationTime * 50); gc.setStroke(Color.WHITE); gc.setLineWidth(3); gc.strokeRect(-15, -15, 30, 30); gc.restore(); gc.setEffect(null);
             gc.setFill(Color.WHITE); gc.setFont(Font.font("Impact", 18)); gc.fillText("CORE", x-18, y-45);
         }
-        renderModernBar(x, y-40, state.baseHp, 2000, 80, state.baseHp < 500 ? NEON_RED : NEON_GREEN);
+        // Đẩy thanh HP lên cao một chút cho khỏi vướng nhà chính
+        renderModernBar(x, y - 45, state.baseHp, 2000, 80, state.baseHp < 500 ? NEON_RED : NEON_GREEN);
     }
 
     private void drawTower(Tower t) {
         double x = t.x, y = t.y;
+        if (t.type == TowerType.ARCHER) {
+            long elapsedNanos = System.nanoTime() - t.lastAtk;
+            boolean isShooting = elapsedNanos < 400_000_000L;
+
+            SpriteSheet anim = isShooting ? animCache.get("archer_shoot") : animCache.get("archer_idle");
+
+            if (anim != null && anim.sheet != null) {
+                int frameIndex;
+                if (isShooting) {
+                    double progress = elapsedNanos / 400_000_000.0;
+                    frameIndex = Math.max(0, Math.min(anim.frameCount - 1, (int)(progress * anim.frameCount)));
+                } else {
+                    frameIndex = (int)(animationTime * 8) % anim.frameCount;
+                }
+
+                double frameWidth = anim.sheet.getWidth() / anim.frameCount;
+                double frameHeight = anim.sheet.getHeight();
+                double sx = frameIndex * frameWidth;
+                boolean flip = t.target != null && t.target.x < t.x;
+
+                gc.save();
+                gc.translate(x, y - 20);
+                if (flip) gc.scale(-1, 1);
+                gc.drawImage(anim.sheet, sx, 0, frameWidth, frameHeight, -90, -90, 180, 180);
+                gc.restore();
+
+                gc.setFill(Color.WHITE); gc.setFont(Font.font("Consolas", FontWeight.BOLD, 14)); gc.fillText("Lv." + t.level, x-15, y+20);
+                return;
+            }
+        }
+
+        // --- CÁC TRỤ KHÁC ---
         Image img = imageCache.get("tower_" + t.type.name().toLowerCase());
 
-        if (System.currentTimeMillis() - t.lastAtk < 100) gc.setEffect(new Glow(0.8));
+        if (System.nanoTime() - t.lastAtk < 100_000_000L) gc.setEffect(new Glow(0.8));
         else gc.setEffect(new DropShadow(15, t.type.color));
 
         if (img != null) {
-            gc.drawImage(img, x - 30, y - 40, 60, 80);
+            // ĐÃ THÊM: Nếu là Trại lính (BARRACKS) thì vẽ to hơn và vuông hơn
+            if (t.type == TowerType.BARRACKS) {
+                gc.drawImage(img, x - 45, y - 45, 90, 90);
+            } else {
+                gc.drawImage(img, x - 30, y - 40, 60, 80);
+            }
+
             gc.setEffect(null);
             gc.setFill(Color.WHITE); gc.setFont(Font.font("Consolas", FontWeight.BOLD, 14)); gc.fillText("Lv." + t.level, x-15, y+20);
             return;
         }
 
         gc.setFill(Color.web("#222")); gc.fillOval(x-25, y-20, 50, 30); gc.setFill(t.type.color.darker()); gc.fillRect(x-20, y-25, 40, 15);
-        switch (t.type) {
-            case ARCHER: gc.setFill(new LinearGradient(0,0,1,0, true, CycleMethod.NO_CYCLE, new Stop(0, t.type.color), new Stop(1, t.type.color.brighter()))); gc.fillRect(x-10, y-55, 20, 40); gc.setStroke(Color.WHITE); gc.setLineWidth(3); gc.strokeArc(x-20, y-65, 40, 30, 0, 180, ArcType.OPEN); break;
-            case MAGE: gc.setFill(t.type.color.darker()); gc.fillPolygon(new double[]{x-15, x+15, x}, new double[]{y-10, y-10, y-60}, 3); gc.setFill(t.type.color); gc.fillOval(x-12, y-72 + Math.sin(animationTime*2)*5, 24, 24); break;
-            case BARRACKS: gc.setFill(t.type.color.darker()); gc.fillRect(x-25, y-30, 50, 25); gc.setFill(t.type.color); gc.fillArc(x-20, y-45, 40, 30, 0, 180, ArcType.ROUND); gc.setFill(Color.BLACK); gc.fillRect(x-8, y-25, 16, 15); break;
-            case CANNON: gc.setFill(t.type.color.darker()); gc.fillRect(x-15, y-40, 30, 20); gc.setFill(t.type.color); gc.fillOval(x-12, y-45, 24, 24); gc.setStroke(Color.BLACK); gc.setLineWidth(6); gc.strokeLine(x, y-35, x+15, y-50); break;
-        }
+        if (t.type == TowerType.MAGE) { gc.setFill(t.type.color.darker()); gc.fillPolygon(new double[]{x-15, x+15, x}, new double[]{y-10, y-10, y-60}, 3); gc.setFill(t.type.color); gc.fillOval(x-12, y-72 + Math.sin(animationTime*2)*5, 24, 24); }
+        else if (t.type == TowerType.BARRACKS) { gc.setFill(t.type.color.darker()); gc.fillRect(x-25, y-30, 50, 25); gc.setFill(t.type.color); gc.fillArc(x-20, y-45, 40, 30, 0, 180, ArcType.ROUND); gc.setFill(Color.BLACK); gc.fillRect(x-8, y-25, 16, 15); }
+        else if (t.type == TowerType.CANNON) { gc.setFill(t.type.color.darker()); gc.fillRect(x-15, y-40, 30, 20); gc.setFill(t.type.color); gc.fillOval(x-12, y-45, 24, 24); gc.setStroke(Color.BLACK); gc.setLineWidth(6); gc.strokeLine(x, y-35, x+15, y-50); }
         gc.setEffect(null); gc.setFill(Color.WHITE); gc.setFont(Font.font("Consolas", FontWeight.BOLD, 12)); gc.fillText("Lv." + t.level, x-12, y+5);
     }
-
     private void drawMonster(Monster m) {
         double x = m.x, y = m.y;
         Image img = imageCache.get("monster_" + m.type.name().toLowerCase());
