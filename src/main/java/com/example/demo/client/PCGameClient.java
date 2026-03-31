@@ -150,6 +150,23 @@ public class PCGameClient extends Application {
             animCache.put("archer_shoot", new SpriteSheet(new Image(getClass().getResourceAsStream("/static/images/Archer_Shoot.png")), 8));
             imageCache.put("arrow", new Image(getClass().getResourceAsStream("/static/images/Arrow.png")));
         } catch (Exception e) { System.out.println("Thiếu file ảnh Archer hoặc Arrow"); }
+        try {
+            animCache.put("archer_idle", new SpriteSheet(new Image(getClass().getResourceAsStream("/static/images/Archer_Idle.png")), 6));
+            animCache.put("archer_run", new SpriteSheet(new Image(getClass().getResourceAsStream("/static/images/Archer_Run.png")), 6));
+            animCache.put("archer_shoot", new SpriteSheet(new Image(getClass().getResourceAsStream("/static/images/Archer_Shoot.png")), 8));
+            animCache.put("monster_goblin", new SpriteSheet(new Image(getClass().getResourceAsStream("/static/images/goblin_run.png")), 6));
+            animCache.put("monster_orc", new SpriteSheet(new Image(getClass().getResourceAsStream("/static/images/orc_run.png")), 6));
+            animCache.put("monster_shaman", new SpriteSheet(new Image(getClass().getResourceAsStream("/static/images/shaman_run.png")), 4));
+            animCache.put("monster_boss", new SpriteSheet(new Image(getClass().getResourceAsStream("/static/images/boss_run.png")), 6));
+            imageCache.put("arrow", new Image(getClass().getResourceAsStream("/static/images/Arrow.png")));
+        } catch (Exception e) { System.out.println("Thiếu file ảnh Sprite Sheet!"); }
+        try {
+            animCache.put("mage_idle", new SpriteSheet(new Image(getClass().getResourceAsStream("/static/images/Mage_Idle.png")), 6));
+            animCache.put("mage_shoot", new SpriteSheet(new Image(getClass().getResourceAsStream("/static/images/Mage_Shoot.png")), 11));
+            animCache.put("cannon_idle", new SpriteSheet(new Image(getClass().getResourceAsStream("/static/images/Cannon_Idle.png")), 8));
+            animCache.put("cannon_shoot", new SpriteSheet(new Image(getClass().getResourceAsStream("/static/images/Cannon_Shoot.png")), 4));
+        } catch (Exception e) { System.out.println("Chưa có dải ảnh động cho Mage hoặc Cannon, sẽ dùng ảnh tĩnh dự phòng."); }
+
     }
     // HÀM ĐIỀU KHIỂN CHUYỂN BÀI NHẠC NỀN MƯỢT MÀ
     private void playBgm(String type) {
@@ -625,11 +642,6 @@ public class PCGameClient extends Application {
 
         Color[] stageColors = {NEON_CYAN, NEON_PURPLE, NEON_ORANGE, NEON_GREEN, NEON_RED};
         Color currentMapColor = stageColors[(state.currentLevel - 1) % stageColors.length];
-
-//        gc.setLineCap(StrokeLineCap.ROUND); gc.setLineJoin(StrokeLineJoin.ROUND); gc.setEffect(new DropShadow(20, currentMapColor));
-//        gc.setStroke(currentMapColor); gc.setLineWidth(60); gc.beginPath(); gc.moveTo(state.currentPath.get(0).getX(), state.currentPath.get(0).getY()); for(Point2D p : state.currentPath) gc.lineTo(p.getX(), p.getY()); gc.stroke();
-//        gc.setEffect(null); gc.setStroke(ROAD_COLOR); gc.setLineWidth(50); gc.beginPath(); gc.moveTo(state.currentPath.get(0).getX(), state.currentPath.get(0).getY()); for(Point2D p : state.currentPath) gc.lineTo(p.getX(), p.getY()); gc.stroke();
-
         Point2D end = state.currentPath.get(state.currentPath.size()-1); drawBase(end.getX(), end.getY());
 
         for(Tower t : state.towers) drawTower(t);
@@ -721,17 +733,16 @@ public class PCGameClient extends Application {
             gc.save(); gc.translate(x, y+10); gc.rotate(animationTime * 50); gc.setStroke(Color.WHITE); gc.setLineWidth(3); gc.strokeRect(-15, -15, 30, 30); gc.restore(); gc.setEffect(null);
             gc.setFill(Color.WHITE); gc.setFont(Font.font("Impact", 18)); gc.fillText("CORE", x-18, y-45);
         }
-        // Đẩy thanh HP lên cao một chút cho khỏi vướng nhà chính
-        renderModernBar(x, y - 45, state.baseHp, 2000, 80, state.baseHp < 500 ? NEON_RED : NEON_GREEN);
+        renderModernBar(x, y - 110, state.baseHp, 2000, 80, state.baseHp < 500 ? NEON_RED : NEON_GREEN);
     }
 
     private void drawTower(Tower t) {
         double x = t.x, y = t.y;
-        if (t.type == TowerType.ARCHER) {
+        if (t.type == TowerType.ARCHER || t.type == TowerType.MAGE || t.type == TowerType.CANNON) {
             long elapsedNanos = System.nanoTime() - t.lastAtk;
             boolean isShooting = elapsedNanos < 400_000_000L;
-
-            SpriteSheet anim = isShooting ? animCache.get("archer_shoot") : animCache.get("archer_idle");
+            String typeStr = t.type.name().toLowerCase();
+            SpriteSheet anim = isShooting ? animCache.get(typeStr + "_shoot") : animCache.get(typeStr + "_idle");
 
             if (anim != null && anim.sheet != null) {
                 int frameIndex;
@@ -741,7 +752,6 @@ public class PCGameClient extends Application {
                 } else {
                     frameIndex = (int)(animationTime * 8) % anim.frameCount;
                 }
-
                 double frameWidth = anim.sheet.getWidth() / anim.frameCount;
                 double frameHeight = anim.sheet.getHeight();
                 double sx = frameIndex * frameWidth;
@@ -750,6 +760,7 @@ public class PCGameClient extends Application {
                 gc.save();
                 gc.translate(x, y - 20);
                 if (flip) gc.scale(-1, 1);
+
                 gc.drawImage(anim.sheet, sx, 0, frameWidth, frameHeight, -90, -90, 180, 180);
                 gc.restore();
 
@@ -757,26 +768,25 @@ public class PCGameClient extends Application {
                 return;
             }
         }
-
-        // --- CÁC TRỤ KHÁC ---
         Image img = imageCache.get("tower_" + t.type.name().toLowerCase());
 
         if (System.nanoTime() - t.lastAtk < 100_000_000L) gc.setEffect(new Glow(0.8));
         else gc.setEffect(new DropShadow(15, t.type.color));
 
         if (img != null) {
-            // ĐÃ THÊM: Nếu là Trại lính (BARRACKS) thì vẽ to hơn và vuông hơn
             if (t.type == TowerType.BARRACKS) {
                 gc.drawImage(img, x - 45, y - 45, 90, 90);
-            } else {
+            }
+            else if (t.type == TowerType.MAGE || t.type == TowerType.CANNON) {
+                gc.drawImage(img, x - 40, y - 50, 80, 100);
+            }
+            else {
                 gc.drawImage(img, x - 30, y - 40, 60, 80);
             }
-
             gc.setEffect(null);
             gc.setFill(Color.WHITE); gc.setFont(Font.font("Consolas", FontWeight.BOLD, 14)); gc.fillText("Lv." + t.level, x-15, y+20);
             return;
         }
-
         gc.setFill(Color.web("#222")); gc.fillOval(x-25, y-20, 50, 30); gc.setFill(t.type.color.darker()); gc.fillRect(x-20, y-25, 40, 15);
         if (t.type == TowerType.MAGE) { gc.setFill(t.type.color.darker()); gc.fillPolygon(new double[]{x-15, x+15, x}, new double[]{y-10, y-10, y-60}, 3); gc.setFill(t.type.color); gc.fillOval(x-12, y-72 + Math.sin(animationTime*2)*5, 24, 24); }
         else if (t.type == TowerType.BARRACKS) { gc.setFill(t.type.color.darker()); gc.fillRect(x-25, y-30, 50, 25); gc.setFill(t.type.color); gc.fillArc(x-20, y-45, 40, 30, 0, 180, ArcType.ROUND); gc.setFill(Color.BLACK); gc.fillRect(x-8, y-25, 16, 15); }
@@ -785,10 +795,27 @@ public class PCGameClient extends Application {
     }
     private void drawMonster(Monster m) {
         double x = m.x, y = m.y;
-        Image img = imageCache.get("monster_" + m.type.name().toLowerCase());
-        if (img != null) {
-            double size = m.type == MonsterType.BOSS ? 80 : 40;
-            gc.drawImage(img, x - size/2, y - size/2, size, size);
+        // 1. TÌM DẢI ẢNH (SPRITE SHEET) CỦA LOẠI QUÁI NÀY
+        String animKey = "monster_" + m.type.name().toLowerCase();
+        SpriteSheet anim = animCache.get(animKey);
+
+        if (anim != null && anim.sheet != null) {
+            int frameIndex = (int)(animationTime * 10) % anim.frameCount;
+            double frameWidth = anim.sheet.getWidth() / anim.frameCount;
+            double frameHeight = anim.sheet.getHeight();
+            double sx = frameIndex * frameWidth;
+            boolean flip = false;
+            if (m.pathIdx < state.currentPath.size() - 1) {
+                Point2D nextPoint = state.currentPath.get(m.pathIdx + 1);
+                if (nextPoint.getX() < m.x) flip = true;
+            }
+            double size = m.type == MonsterType.BOSS ? 300 : 150;
+            gc.save();
+            gc.translate(x, y - 10);
+            if (flip) gc.scale(-1, 1);
+            gc.setEffect(new DropShadow(10, m.type.color));
+            gc.drawImage(anim.sheet, sx, 0, frameWidth, frameHeight, -size/2, -size/2, size, size);
+            gc.restore();
             return;
         }
         Color c = m.type.color;
