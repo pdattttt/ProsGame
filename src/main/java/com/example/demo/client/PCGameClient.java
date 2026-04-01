@@ -64,7 +64,7 @@ public class PCGameClient extends Application {
 
     private Map<String, Image> imageCache = new HashMap<>();
     private Map<String, AudioClip> soundCache = new HashMap<>();
-
+    private Map<String, Integer> spriteFrames = new HashMap<>();
     // --- HỆ THỐNG SAVE / LOAD HIGH SCORE ---
     private int bestEndlessWave = 0;
     private int maxKillsRecord = 0;
@@ -115,9 +115,27 @@ public class PCGameClient extends Application {
     }
 
     private void loadResources() {
+
         String[] imgNames = { "tower_archer", "tower_mage", "tower_barracks", "tower_cannon", "monster_goblin", "monster_orc", "monster_shaman", "monster_boss", "base_core", "bg_neon", "map_1", "map_2", "map_3" };
+        spriteFrames.put("tower_mage", 6);
+        spriteFrames.put("mage_shoot", 11);
+        spriteFrames.put("tower_archer", 6);
+        spriteFrames.put("archer_shoot", 8);
+        spriteFrames.put("tower_barracks", 1);
+        spriteFrames.put("tower_cannon", 8);
+        spriteFrames.put("cannon_shoot", 4);
+        spriteFrames.put("monster_goblin", 6);
+        spriteFrames.put("monster_orc", 6);
+        spriteFrames.put("monster_shaman", 4);
+        spriteFrames.put("monster_boss", 6);
+        spriteFrames.put("base_core", 1);
+        spriteFrames.put("bg_neon", 1);
+        spriteFrames.put("arrow", 1);
         for (String name : imgNames) {
-            try { Image img = new Image(getClass().getResourceAsStream("/static/images/" + name + ".png")); if (!img.isError()) imageCache.put(name, img); } catch (Exception e) {}
+            try {
+                Image img = new Image(getClass().getResourceAsStream("/static/images/" + name + ".png"));
+                if (img != null && !img.isError()) imageCache.put(name, img);
+            } catch (Exception e) {}
         }
         try { Image mapImg = new Image(getClass().getResourceAsStream("/static/images/map_1.jpg")); if (!mapImg.isError()) imageCache.put("map_1", mapImg); } catch (Exception e) {}
 
@@ -200,7 +218,33 @@ public class PCGameClient extends Application {
 
         stage.setTitle("NEON DEFENSE PRO"); stage.setScene(new Scene(rootPane, WIDTH, HEIGHT)); stage.show();
     }
+    private void drawAnimatedSprite(Image img, int totalFrames, double x, double y, double size, double speedModifier, boolean isFlipped) {
+        if (totalFrames <= 0) totalFrames = 1;
 
+        // Chiều rộng thực của MỘT khung hình đơn lẻ
+        double frameWidth = img.getWidth() / totalFrames;
+        double frameHeight = img.getHeight();
+
+        // Tính toán khung hình hiện tại dựa trên thời gian
+        int currentFrame = (int) ((animationTime * speedModifier) % totalFrames);
+        double sourceX = currentFrame * frameWidth;
+
+        // Tính toán kích thước vẽ để giữ đúng tỉ lệ ảnh (không bị bóp méo)
+        double aspectRatio = frameWidth / frameHeight;
+        double drawW = size;
+        double drawH = size / aspectRatio;
+
+        gc.save();
+        if (isFlipped) {
+            gc.translate(x, y);
+            gc.scale(-1, 1);
+            gc.translate(-x, -y);
+        }
+
+        // Vẽ chính xác khung hình đã cắt
+        gc.drawImage(img, sourceX, 0, frameWidth, frameHeight, x - drawW / 2, y - drawH / 2, drawW, drawH);
+        gc.restore();
+    }
     private void sellTower(Tower t) {
         int refund = (t.type.cost + (t.level-1)*50) / 2;
         state.gold += refund;
@@ -505,7 +549,7 @@ public class PCGameClient extends Application {
             if(t.type==TowerType.BARRACKS) continue;
             if(t.target==null || t.target.hp<=0 || t.dist(t.target.x, t.target.y)>t.getRange()) t.target = state.monsters.stream().filter(m->t.dist(m.x,m.y)<=t.getRange()).min(Comparator.comparingDouble(m->t.dist(m.x,m.y))).orElse(null);
 
-            if(t.target!=null && now-t.lastAtk > t.getCooldown()*1e9) {
+            if(t.target!=null && currentTime - t.lastAtk > t.getCooldown() * 1000) {
                 state.projectiles.add(new Projectile(t.x, t.y-20, t.target.x, t.target.y, t.type.color));
 
                 if (t.type == TowerType.CANNON) {
@@ -527,7 +571,7 @@ public class PCGameClient extends Application {
                     if (Math.random() < 0.2) t.target.frozenTimer = 60;
                     else if (Math.random() < 0.4) t.target.burnTimer = 60;
                 }
-                t.lastAtk=now;
+                t.lastAtk=currentTime;
             }
         }
     }
@@ -718,13 +762,28 @@ public class PCGameClient extends Application {
             else { gc.setFill(p.color); gc.fillOval(p.x, p.y, p.size, p.size); }
         }
         gc.setGlobalAlpha(1.0);
-
+        Image arrowImg = imageCache.get("Arrow");
         gc.setEffect(new Glow(1.0));
         for(Projectile p : state.projectiles) {
             gc.setStroke(p.c);
-            if(p.c.equals(TowerType.MAGE.color)) { gc.setLineWidth(6); gc.strokeLine(p.sx, p.sy, p.ex, p.ey); gc.setStroke(Color.WHITE); gc.setLineWidth(2); gc.strokeLine(p.sx, p.sy, p.ex, p.ey); }
-            else if(p.c.equals(TowerType.CANNON.color)) { gc.setFill(p.c); gc.fillOval(p.sx + (p.ex-p.sx)*0.5 - 8, p.sy + (p.ey-p.sy)*0.5 - 8, 16, 16); }
-            else { gc.setLineWidth(3); gc.strokeLine(p.sx, p.sy, p.ex, p.ey); }
+            if(p.c.equals(TowerType.ARCHER.color) && arrowImg != null) {
+                double angle = Math.toDegrees(Math.atan2(p.ey - p.sy, p.ex - p.sx));
+                gc.save();
+                gc.translate(p.sx + (p.ex-p.sx)*0.5, p.sy + (p.ey-p.sy)*0.5);
+                gc.rotate(angle);
+                gc.drawImage(arrowImg, -15, -7, 30, 15);
+                gc.restore();
+            }
+            else if(p.c.equals(TowerType.MAGE.color)) {
+                gc.setLineWidth(6); gc.strokeLine(p.sx, p.sy, p.ex, p.ey);
+                gc.setStroke(Color.WHITE); gc.setLineWidth(2); gc.strokeLine(p.sx, p.sy, p.ex, p.ey);
+            }
+            else if(p.c.equals(TowerType.CANNON.color)) {
+                gc.setFill(p.c); gc.fillOval(p.sx + (p.ex-p.sx)*0.5 - 8, p.sy + (p.ey-p.sy)*0.5 - 8, 16, 16);
+            }
+            else {
+                gc.setLineWidth(3); gc.strokeLine(p.sx, p.sy, p.ex, p.ey);
+            }
         }
         gc.setEffect(null);
 
@@ -799,19 +858,52 @@ public class PCGameClient extends Application {
 
     private void drawTower(Tower t) {
         double x = t.x, y = t.y;
-        Image img = imageCache.get("tower_" + t.type.name().toLowerCase());
+        long now = System.currentTimeMillis();
 
-        if (System.currentTimeMillis() - t.lastAtk < 100) gc.setEffect(new Glow(0.8));
-        else gc.setEffect(new DropShadow(15, t.type.color));
+        // Fix: Hoạt ảnh bắn sẽ chiếm 60% thời gian của tốc độ bắn (Cooldown)
+        // Giúp hoạt ảnh luôn hiển thị đầy đủ dù bắn nhanh hay chậm
+        double attackDurationMs = t.getCooldown() * 1000 * 0.6;
+        boolean isShooting = (now - t.lastAtk < attackDurationMs);
+
+        String stateStr = isShooting ? "shoot" : "idle";
+        String towerNameStr = t.type.name().toLowerCase();
+
+        String imageKey = towerNameStr + "_" + stateStr;
+        Image img = imageCache.get(imageKey);
+        Integer framesObj = spriteFrames.get(imageKey);
+
+        if (img == null) {
+            imageKey = "tower_" + towerNameStr;
+            img = imageCache.get(imageKey);
+            framesObj = spriteFrames.get(imageKey);
+        }
 
         if (img != null) {
-            gc.drawImage(img, x - 30, y - 40, 60, 80);
-            gc.setEffect(null);
-            gc.setFill(Color.WHITE); gc.setFont(Font.font("Consolas", FontWeight.BOLD, 14)); gc.fillText("Lv." + t.level, x-15, y+20);
+            int frames = (framesObj != null) ? framesObj : 1;
+            double towerSize = 130;
+
+            if (frames > 1) {
+                boolean flip = t.target != null && t.target.x < t.x;
+
+                // Tính toán speedModifier để hoạt ảnh chạy hết số khung hình vừa đúng lúc hồi chiêu xong
+                // Công thức: Speed = (Số khung hình) / (Thời gian diễn hoạt tính bằng giây của code máy)
+                double animSpeed = isShooting ? (frames / (attackDurationMs / 100)) : 8;
+
+                drawAnimatedSprite(img, frames, x, y - 20, towerSize, animSpeed, flip);
+            } else {
+                gc.drawImage(img, x - towerSize/2, y - towerSize/2 - 10, towerSize, towerSize);
+            }
+
+            gc.setFill(Color.WHITE);
+            gc.setFont(Font.font("Consolas", FontWeight.BOLD, 14));
+            gc.fillText("Lv." + t.level, x-15, y+45);
             return;
         }
 
-        gc.setFill(Color.web("#222")); gc.fillOval(x-25, y-20, 50, 30); gc.setFill(t.type.color.darker()); gc.fillRect(x-20, y-25, 40, 15);
+
+        // --- FALLBACK VẼ BẰNG CODE DỰ PHÒNG CHỐNG CRASH (BỎ GLOW) ---
+        gc.setFill(Color.web("#222")); gc.fillOval(x-25, y-20, 50, 30);
+        gc.setFill(t.type.color.darker()); gc.fillRect(x-20, y-25, 40, 15);
         switch (t.type) {
             case ARCHER: gc.setFill(new LinearGradient(0,0,1,0, true, CycleMethod.NO_CYCLE, new Stop(0, t.type.color), new Stop(1, t.type.color.brighter()))); gc.fillRect(x-10, y-55, 20, 40); gc.setStroke(Color.WHITE); gc.setLineWidth(3); gc.strokeArc(x-20, y-65, 40, 30, 0, 180, ArcType.OPEN); break;
             case MAGE: gc.setFill(t.type.color.darker()); gc.fillPolygon(new double[]{x-15, x+15, x}, new double[]{y-10, y-10, y-60}, 3); gc.setFill(t.type.color); gc.fillOval(x-12, y-72 + Math.sin(animationTime*2)*5, 24, 24); break;
@@ -823,10 +915,24 @@ public class PCGameClient extends Application {
 
     private void drawMonster(Monster m) {
         double x = m.x, y = m.y;
-        Image img = imageCache.get("monster_" + m.type.name().toLowerCase());
+        String monsterNameStr = m.type.name().toLowerCase();
+        String imageKey = "monster_" + monsterNameStr;
+        Image img = imageCache.get(imageKey);
+        Integer framesObj = spriteFrames.get(imageKey);
         if (img != null) {
-            double size = m.type == MonsterType.BOSS ? 80 : 40;
-            gc.drawImage(img, x - size/2, y - size/2, size, size);
+            double size = m.type == MonsterType.BOSS ? 160 : 75;
+            int frames = (framesObj != null) ? framesObj : 1;
+
+            if (frames > 1) {
+                boolean flip = false;
+                if (m.pathIdx < state.currentPath.size() - 1) {
+                    Point2D next = state.currentPath.get(m.pathIdx + 1);
+                    flip = next.getX() < m.x;
+                }
+                drawAnimatedSprite(img, frames, x, y, size, 12, flip);
+            } else {
+                gc.drawImage(img, x - size/2, y - size/2, size, size);
+            }
             return;
         }
         Color c = m.type.color;
@@ -837,7 +943,6 @@ public class PCGameClient extends Application {
             case BOSS: gc.setFill(c.darker()); gc.fillOval(x-30, y-40, 60, 80); gc.setFill(Color.BLACK); gc.fillPolygon(new double[]{x-10, x+10, x}, new double[]{y-40, y-40, y-60}, 3); gc.fillPolygon(new double[]{x-30, x-10, x-20}, new double[]{y-20, y-20, y-40}, 3); gc.fillPolygon(new double[]{x+10, x+30, x+20}, new double[]{y-20, y-20, y-40}, 3); gc.setFill(Color.YELLOW); gc.fillOval(x-15, y-20, 10, 5); gc.fillOval(x+5, y-20, 10, 5); break;
         }
     }
-
     private void drawSoldier(double x, double y) {
         gc.setFill(NEON_CYAN.darker()); gc.fillArc(x-10, y-15, 20, 20, 0, 180, ArcType.ROUND); gc.setFill(NEON_CYAN); gc.fillRect(x-12, y-5, 24, 15); gc.setStroke(Color.WHITE); gc.setLineWidth(2); gc.strokeLine(x+5, y-10, x+15, y+5);
     }
@@ -845,6 +950,7 @@ public class PCGameClient extends Application {
         if (cur < 0) cur = 0;
         gc.setFill(Color.rgb(0,0,0,0.7)); gc.fillRoundRect(x-w/2, y, w, 5, 2, 2); gc.setFill(c); gc.fillRoundRect(x-w/2, y, w * Math.max(0, (double)cur/max), 5, 2, 2);
     }
+
 
     // --- UI PANELS ---
     private void setupGameHUD() {
@@ -871,6 +977,7 @@ public class PCGameClient extends Application {
 
     // --- CẢI TIẾN: GIAO DIỆN SHOP CÓ ICON & NÚT REPAIR/SELL ---
     private void createBottomShop() {
+
         bottomPanel = new HBox(15); bottomPanel.setPadding(new Insets(10, 20, 10, 20)); bottomPanel.setAlignment(Pos.CENTER); bottomPanel.setMaxHeight(90);
         bottomPanel.setStyle("-fx-background-color: rgba(20,20,30,0.9); -fx-background-radius: 20 20 0 0; -fx-border-color: #00fff5; -fx-border-width: 2 2 0 2;");
         StackPane.setAlignment(bottomPanel, Pos.BOTTOM_CENTER);
@@ -878,12 +985,28 @@ public class PCGameClient extends Application {
         shopButtons.clear();
         for(TowerType t : TowerType.values()) {
             Button b = createStyledButton(t.name() + "\n$" + t.cost + "\nD:" + t.damage, t.color);
-            b.setPrefWidth(100); b.setPrefHeight(60);
+            b.setPrefWidth(120);
+            b.setPrefHeight(80);
 
-            Image icon = imageCache.get("tower_" + t.name().toLowerCase());
-            if (icon != null) {
-                ImageView iv = new ImageView(icon); iv.setFitWidth(20); iv.setFitHeight(30);
-                b.setGraphic(iv); b.setContentDisplay(ContentDisplay.LEFT);
+            String towerName = t.name().toLowerCase();
+            Image iconImg = imageCache.get(towerName + "_idle");
+            if (iconImg == null) iconImg = imageCache.get("tower_" + towerName);
+            if (iconImg != null) {
+                ImageView iv = new ImageView(iconImg);
+                String searchKey = (imageCache.containsKey(towerName + "_idle")) ? (towerName + "_idle") : ("tower_" + towerName);
+                int frames = spriteFrames.getOrDefault(searchKey, 1);
+
+                if (frames > 1) {
+                    double frameWidth = iconImg.getWidth() / frames;
+                    iv.setViewport(new Rectangle2D(0, 0, frameWidth, iconImg.getHeight()));
+                }
+
+                iv.setFitWidth(45);  // Tăng kích thước icon trong Shop
+                iv.setFitHeight(45);
+                iv.setPreserveRatio(true);
+
+                b.setGraphic(iv);
+                b.setContentDisplay(ContentDisplay.TOP); // Để hình ảnh nằm TRÊN chữ
             }
 
             b.setOnAction(e -> { state.selectedTower = t; state.isSellMode = false; });
@@ -891,27 +1014,51 @@ public class PCGameClient extends Application {
             bottomPanel.getChildren().add(b);
         }
 
-        Label lblActs = new Label(" ACTIONS"); lblActs.setTextFill(NEON_ORANGE); lblActs.setFont(Font.font("Impact", 24));
+        // Thêm các nút Actions (Sell, Repair, Skills) vào cuối
+        Label lblActs = new Label(" ACTIONS ");
+        lblActs.setTextFill(NEON_ORANGE);
+        lblActs.setFont(Font.font("Impact", 20));
 
-        btnSell = createStyledButton("💰 SELL", Color.GRAY); btnSell.setPrefWidth(80); btnSell.setPrefHeight(60);
-        btnSell.setOnAction(e -> { state.isSellMode = !state.isSellMode; state.message = state.isSellMode ? "CHẾ ĐỘ BÁN: Chọn trụ để bán!" : "Đã hủy Bán."; });
+        btnSell = createStyledButton("💰\nSELL", Color.GRAY); btnSell.setPrefWidth(70); btnSell.setPrefHeight(80);
+        btnSell.setOnAction(e -> { state.isSellMode = !state.isSellMode; state.message = state.isSellMode ? "CHẾ ĐỘ BÁN: Chọn trụ trên bản đồ!" : "Đã hủy Bán."; });
 
-        Button btnRepair = createStyledButton("🛠️ REPAIR\n$200", NEON_GREEN); btnRepair.setPrefWidth(90); btnRepair.setPrefHeight(60);
+        Button btnRepair = createStyledButton("🛠️\nREPAIR", NEON_GREEN); btnRepair.setPrefWidth(80); btnRepair.setPrefHeight(80);
         btnRepair.setOnAction(e -> repairCore());
 
-        Button btnFreeze = createStyledButton("❄ FREEZE\n$100", NEON_CYAN); btnFreeze.setPrefWidth(90); btnFreeze.setPrefHeight(60); btnFreeze.setOnAction(e -> activateSkill("FREEZE", 100));
-        Button btnBomb = createStyledButton("💣 BOMB\n$150", NEON_ORANGE); btnBomb.setPrefWidth(90); btnBomb.setPrefHeight(60); btnBomb.setOnAction(e -> activateSkill("BOMB", 150));
+        Button btnFreeze = createStyledButton("❄️\nFREEZE", NEON_CYAN); btnFreeze.setPrefWidth(80); btnFreeze.setPrefHeight(80);
+        btnFreeze.setOnAction(e -> activateSkill("FREEZE", 100));
 
-        bottomPanel.getChildren().addAll(lblActs, btnSell, btnRepair, btnFreeze, btnBomb); rootPane.getChildren().add(bottomPanel);
+        Button btnBomb = createStyledButton("💣\nBOMB", NEON_ORANGE); btnBomb.setPrefWidth(80); btnBomb.setPrefHeight(80);
+        btnBomb.setOnAction(e -> activateSkill("BOMB", 150));
+
+        bottomPanel.getChildren().addAll(lblActs, btnSell, btnRepair, btnFreeze, btnBomb);
+        rootPane.getChildren().add(bottomPanel);
     }
 
     private void createBottomAttackerPanel() {
-        bottomPanel = new HBox(20); bottomPanel.setPadding(new Insets(10, 20, 10, 20)); bottomPanel.setAlignment(Pos.CENTER); bottomPanel.setMaxHeight(80);
+        if (bottomPanel != null && rootPane.getChildren().contains(bottomPanel)) rootPane.getChildren().remove(bottomPanel);
+        bottomPanel = new HBox(20); bottomPanel.setPadding(new Insets(10, 20, 10, 20)); bottomPanel.setAlignment(Pos.CENTER); bottomPanel.setMaxHeight(90); // Tăng chiều cao lên 90
         bottomPanel.setStyle("-fx-background-color: rgba(20,20,30,0.9); -fx-background-radius: 20 20 0 0; -fx-border-color: #e94560; -fx-border-width: 2 2 0 2;");
         StackPane.setAlignment(bottomPanel, Pos.BOTTOM_CENTER);
         Label lbl = new Label("UNITS"); lbl.setTextFill(NEON_RED); lbl.setFont(Font.font("Impact", 24)); bottomPanel.getChildren().add(lbl);
         for(MonsterType t : MonsterType.values()) {
-            Button b = createStyledButton(t.name() + " (" + t.cooldown + "s)", t.color); b.setPrefWidth(140); b.setPrefHeight(40);
+            Button b = createStyledButton(t.name() + "\n(" + t.cooldown + "s)", t.color);
+            b.setPrefWidth(120); b.setPrefHeight(60);
+
+            Image icon = imageCache.get("monster_" + t.name().toLowerCase());
+            if (icon != null) {
+                ImageView iv = new ImageView(icon);
+                Integer framesObj = spriteFrames.get("monster_" + t.name().toLowerCase());
+                int frames = (framesObj != null) ? framesObj : 1;
+
+                if (frames > 1) {
+                    double frameWidth = icon.getWidth() / frames;
+                    iv.setViewport(new Rectangle2D(0, 0, frameWidth, icon.getHeight()));
+                }
+
+                iv.setFitWidth(30); iv.setFitHeight(30);
+                b.setGraphic(iv); b.setContentDisplay(ContentDisplay.LEFT);
+            }
 
             Tooltip tip = new Tooltip("HP: " + t.hp + "\nSpeed: " + t.speed + "\nReward: $" + t.reward);
             tip.setShowDelay(Duration.millis(100)); tip.setFont(Font.font("Consolas", 14));
