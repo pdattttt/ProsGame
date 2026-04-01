@@ -115,7 +115,6 @@ public class PCGameClient extends Application {
     }
 
     private void loadResources() {
-
         String[] imgNames = { "tower_archer", "archer_shoot",
                 "tower_mage", "mage_shoot",
                 "tower_barracks",
@@ -211,8 +210,6 @@ public class PCGameClient extends Application {
                         updateLogic(now);
                         if (state.isOfflineMode && "DEFENDER".equals(state.myRole)) waveManager.update(state, network, System.currentTimeMillis());
                         else if (state.isOfflineMode && "ATTACKER".equals(state.myRole)) updateAI(now);
-
-                        // CHẶN TREO GAME: Gọi bảng tổng kết ngay khi win/thua
                         if (state.isVictory) handleVictory();
                         else if (state.isGameOver) handleDefeat();
                     }
@@ -225,8 +222,6 @@ public class PCGameClient extends Application {
     }
     private void drawAnimatedSprite(Image img, int totalFrames, double x, double y, double size, double speedModifier, boolean isFlipped) {
         if (totalFrames <= 0) totalFrames = 1;
-
-        // Chiều rộng thực của MỘT khung hình đơn lẻ
         double frameWidth = img.getWidth() / totalFrames;
         double frameHeight = img.getHeight();
 
@@ -731,7 +726,6 @@ public class PCGameClient extends Application {
 
     private void render() {
         gc.save();
-        // 1. HIỆU ỨNG RUNG MÀN HÌNH (SCREEN SHAKE)
         if (screenShake > 0) {
             double dx = (Math.random() - 0.5) * screenShake;
             double dy = (Math.random() - 0.5) * screenShake;
@@ -762,13 +756,11 @@ public class PCGameClient extends Application {
 
         for(Soldier s : state.soldiers) {
             drawSoldier(s.x, s.y);
-            // Thanh máu lính: to hơn và cao hơn để không đè lên hình lính lớn
             renderModernBar(s.x, s.y - 40, s.hp, 100, 50, NEON_CYAN);
         }
 
         for(Monster m : monsterSnapshot) {
             drawMonster(m);
-            // Kích thước thanh máu quái khớp với kích thước mới (Boss 160, Quái thường 75-80)
             double barSize = (m.type == MonsterType.BOSS) ? 100 : 50;
             double barYOffset = (m.type == MonsterType.BOSS) ? 85 : 45;
             renderModernBar(m.x, m.y - barYOffset, m.hp, m.maxHp, barSize, NEON_RED);
