@@ -15,8 +15,6 @@ import javafx.scene.input.*;
 import javafx.scene.layout.*;
 import javafx.scene.paint.*;
 import javafx.scene.shape.ArcType;
-import javafx.scene.shape.StrokeLineCap;
-import javafx.scene.shape.StrokeLineJoin;
 import javafx.scene.text.*;
 import javafx.stage.Stage;
 import javafx.scene.media.*;
@@ -47,13 +45,25 @@ public class PCGameClient extends Application {
     private VBox menuOverlay;
 
     private Label lblTime, lblCore, lblGold, lblMessage, lblQuest;
-    private ProgressBar buildBar;
     private Map<TowerType, Button> shopButtons = new HashMap<>();
     private Map<MonsterType, Button> attackerButtons = new HashMap<>();
-    private Button btnSell;
+    private Button btnSell, btnSpeed, btnHeal, btnClone, btnCombo;
 
     private double animationTime = 0;
     private double mouseX = -1, mouseY = -1;
+    private long lastRegenTime = 0;
+    private long lastSyncTime = 0;
+
+    // THỐNG KÊ DÀNH CHO ATTACKER
+    private int myMonstersSpawned = 0;
+    private int attackerSkillsUsed = 0;
+
+    // KỸ NĂNG ATTACKER
+    private long lastSpeedUsed = 0;
+    private long lastHealUsed = 0;
+    private long lastCloneUsed = 0;
+    private long lastComboUsed = 0;
+    private long globalSpeedTimer = 0;
 
     private List<DamageText> damageTexts = new ArrayList<>();
     private List<Particle> particles = new ArrayList<>();
@@ -64,23 +74,22 @@ public class PCGameClient extends Application {
 
     private Map<String, Image> imageCache = new HashMap<>();
     private Map<String, AudioClip> soundCache = new HashMap<>();
+    private Map<String, Integer> spriteFrames = new HashMap<>();
 
-    // --- HỆ THỐNG SAVE / LOAD HIGH SCORE ---
     private int bestEndlessWave = 0;
     private int maxKillsRecord = 0;
     private long fastestClearTime = 999999;
     private final String SCORE_FILE = "highscore.properties";
 
-    private class DamageText {
+    private static class DamageText {
         double x, y; String text; Color color; double life = 1.0;
         DamageText(double x, double y, String text, Color color) {
-            this.x = x + ThreadLocalRandom.current().nextDouble(-15, 15);
-            this.y = y + ThreadLocalRandom.current().nextDouble(-15, 0);
+            this.x = x + ThreadLocalRandom.current().nextDouble(-15, 15); this.y = y + ThreadLocalRandom.current().nextDouble(-15, 0);
             this.text = text; this.color = color;
         }
     }
 
-    private class Particle {
+    private static class Particle {
         double x, y, vx, vy, life, maxLife, size; Color color; boolean isRipple;
         Particle(double x, double y, Color c, boolean isRipple) {
             this.x = x; this.y = y; this.color = c; this.isRipple = isRipple;
@@ -95,36 +104,44 @@ public class PCGameClient extends Application {
 
     public static void main(String[] args) { launch(args); }
 
+    private void loadImg(String key, String filename) {
+        try { Image img = new Image(getClass().getResourceAsStream("/static/images/" + filename)); if (img != null && !img.isError()) { imageCache.put(key, img); return; } } catch (Exception e) {}
+        try { Image img = new Image("file:src/main/resources/static/images/" + filename); if (img != null && !img.isError()) { imageCache.put(key, img); return; } } catch (Exception e) {}
+    }
+
     private void loadScores() {
         try (FileReader reader = new FileReader(SCORE_FILE)) {
             Properties p = new Properties(); p.load(reader);
             bestEndlessWave = Integer.parseInt(p.getProperty("bestEndlessWave", "0"));
             maxKillsRecord = Integer.parseInt(p.getProperty("maxKillsRecord", "0"));
             fastestClearTime = Long.parseLong(p.getProperty("fastestClearTime", "999999"));
-        } catch (Exception e) { System.out.println("Tạo file HighScore mới."); }
+        } catch (Exception e) {}
     }
 
     private void saveScores() {
         try (FileWriter writer = new FileWriter(SCORE_FILE)) {
             Properties p = new Properties();
-            p.setProperty("bestEndlessWave", String.valueOf(bestEndlessWave));
-            p.setProperty("maxKillsRecord", String.valueOf(maxKillsRecord));
-            p.setProperty("fastestClearTime", String.valueOf(fastestClearTime));
+            p.setProperty("bestEndlessWave", String.valueOf(bestEndlessWave)); p.setProperty("maxKillsRecord", String.valueOf(maxKillsRecord)); p.setProperty("fastestClearTime", String.valueOf(fastestClearTime));
             p.store(writer, "Neon Defense High Scores");
-        } catch (Exception e) { e.printStackTrace(); }
+        } catch (Exception e) {}
     }
 
     private void loadResources() {
-        String[] imgNames = { "tower_archer", "tower_mage", "tower_barracks", "tower_cannon", "monster_goblin", "monster_orc", "monster_shaman", "monster_boss", "base_core", "bg_neon", "map_1", "map_2", "map_3" };
-        for (String name : imgNames) {
-            try { Image img = new Image(getClass().getResourceAsStream("/static/images/" + name + ".png")); if (!img.isError()) imageCache.put(name, img); } catch (Exception e) {}
-        }
-        try { Image mapImg = new Image(getClass().getResourceAsStream("/static/images/map_1.jpg")); if (!mapImg.isError()) imageCache.put("map_1", mapImg); } catch (Exception e) {}
+        spriteFrames.put("tower_mage", 6); spriteFrames.put("mage_shoot", 11);
+        spriteFrames.put("tower_archer", 6); spriteFrames.put("archer_shoot", 8);
+        spriteFrames.put("tower_barracks", 1); spriteFrames.put("tower_cannon", 8);
+        spriteFrames.put("cannon_shoot", 4); spriteFrames.put("monster_goblin", 6);
+        spriteFrames.put("monster_orc", 6); spriteFrames.put("monster_shaman", 4);
+        spriteFrames.put("monster_boss", 6); spriteFrames.put("soldier", 4);
+
+        String[] imgNames = { "tower_archer", "archer_shoot", "tower_mage", "mage_shoot", "tower_barracks", "tower_cannon", "cannon_shoot", "monster_goblin", "monster_orc", "monster_shaman", "monster_boss", "base_core" };
+        for (String name : imgNames) loadImg(name, name + ".png");
+        loadImg("arrow", "Arrow.png");
+        loadImg("map_1", "map_1.png"); if (!imageCache.containsKey("map_1")) loadImg("map_1", "map_1.jpg");
+        Image soldierImg = imageCache.get("cannon_shoot"); if (soldierImg != null) imageCache.put("soldier", soldierImg);
 
         String[] soundNames = { "build", "shoot", "laser", "cannon", "coin", "base_hit", "freeze", "bomb" };
-        for (String name : soundNames) {
-            try { AudioClip clip = new AudioClip(getClass().getResource("/static/sounds/" + name + ".wav").toExternalForm()); soundCache.put(name, clip); } catch (Exception e) {}
-        }
+        for (String name : soundNames) { try { AudioClip clip = new AudioClip(getClass().getResource("/static/sounds/" + name + ".wav").toExternalForm()); soundCache.put(name, clip); } catch (Exception e) {} }
         try { homeBgmPlayer = new MediaPlayer(new Media(getClass().getResource("/static/sounds/homesound.wav").toExternalForm())); homeBgmPlayer.setCycleCount(MediaPlayer.INDEFINITE); homeBgmPlayer.setVolume(0.3); } catch (Exception e) {}
         try { gameBgmPlayer = new MediaPlayer(new Media(getClass().getResource("/static/sounds/gamesound.wav").toExternalForm())); gameBgmPlayer.setCycleCount(MediaPlayer.INDEFINITE); gameBgmPlayer.setVolume(0.25); } catch (Exception e) {}
         try { endgameBgmPlayer = new MediaPlayer(new Media(getClass().getResource("/static/sounds/untilendgame.wav").toExternalForm())); endgameBgmPlayer.setCycleCount(MediaPlayer.INDEFINITE); endgameBgmPlayer.setVolume(0.25); } catch (Exception e) {}
@@ -141,43 +158,28 @@ public class PCGameClient extends Application {
         else if ("VICTORY".equals(type) && victoryBgmPlayer != null) victoryBgmPlayer.play();
     }
     private void playSound(String name) { AudioClip clip = soundCache.get(name); if (clip != null) clip.play(0.4); }
-
-    private void spawnExplosion(double x, double y, Color c, int count) {
-        particles.add(new Particle(x, y, Color.WHITE, true));
-        for (int i = 0; i < count; i++) particles.add(new Particle(x, y, c, false));
-    }
+    private void spawnExplosion(double x, double y, Color c, int count) { particles.add(new Particle(x, y, Color.WHITE, true)); for (int i = 0; i < count; i++) particles.add(new Particle(x, y, c, false)); }
 
     @Override
     public void start(Stage stage) {
-        loadScores();
-        loadResources();
-        rootPane = new StackPane();
-        Canvas canvas = new Canvas(WIDTH, HEIGHT); gc = canvas.getGraphicsContext2D();
+        loadScores(); loadResources();
+        rootPane = new StackPane(); Canvas canvas = new Canvas(WIDTH, HEIGHT); gc = canvas.getGraphicsContext2D();
 
         canvas.setOnMouseClicked(e -> {
             if ("DEFENDER".equals(state.myRole) && !state.isGameOver && !state.isPaused && !state.isVictory) {
                 if (e.getButton() == MouseButton.PRIMARY) {
-                    Tower existing = state.towers.stream().filter(t -> t.dist(e.getX(), e.getY()) < 40).findFirst().orElse(null);
-
-                    if (state.isSellMode) {
-                        if (existing != null) sellTower(existing);
-                        else { state.isSellMode = false; state.message = "Đã thoát chế độ Bán Trụ."; }
-                    } else {
-                        if (existing != null || isValidBuildSpot(e.getX(), e.getY())) handleBuild(e.getX(), e.getY());
-                    }
+                    Tower existing = state.towers.stream().filter(t -> t.dist(e.getX(), e.getY()) < 60).findFirst().orElse(null);
+                    if (state.isSellMode) { if (existing != null) sellTower(existing); else { state.isSellMode = false; state.message = "Đã thoát chế độ Bán Trụ."; } }
+                    else { if (existing != null || isValidBuildSpot(e.getX(), e.getY())) handleBuild(e.getX(), e.getY()); }
                 } else if (e.getButton() == MouseButton.SECONDARY) {
-                    state.isSellMode = false;
-                    state.selectedTower = state.selectedTower==TowerType.ARCHER ? TowerType.MAGE : state.selectedTower==TowerType.MAGE ? TowerType.BARRACKS : state.selectedTower==TowerType.BARRACKS ? TowerType.CANNON : TowerType.ARCHER;
+                    state.isSellMode = false; state.selectedTower = state.selectedTower==TowerType.ARCHER ? TowerType.MAGE : state.selectedTower==TowerType.MAGE ? TowerType.BARRACKS : state.selectedTower==TowerType.BARRACKS ? TowerType.CANNON : TowerType.ARCHER;
                 }
             }
         });
-
         canvas.setOnMouseMoved(e -> { mouseX = e.getX(); mouseY = e.getY(); });
         canvas.setOnMouseExited(e -> { mouseX = -1; mouseY = -1; });
 
-        rootPane.getChildren().add(canvas);
-        setupGameHUD(); showMainMenu();
-
+        rootPane.getChildren().add(canvas); setupGameHUD(); showMainMenu();
         network = new NetworkManager(this::processAction, msg -> Platform.runLater(() -> state.message = msg), () -> { if (!state.isGameOver && !state.isVictory) togglePause(); });
 
         new AnimationTimer() {
@@ -187,11 +189,8 @@ public class PCGameClient extends Application {
                     if (state.levelStarted && !state.isGameOver && !state.isVictory) {
                         updateLogic(now);
                         if (state.isOfflineMode && "DEFENDER".equals(state.myRole)) waveManager.update(state, network, System.currentTimeMillis());
-                        else if (state.isOfflineMode && "ATTACKER".equals(state.myRole)) updateAI(now);
-
-                        // CHẶN TREO GAME: Gọi bảng tổng kết ngay khi win/thua
-                        if (state.isVictory) handleVictory();
-                        else if (state.isGameOver) handleDefeat();
+                        else if (state.isOfflineMode && "ATTACKER".equals(state.myRole)) updateAI();
+                        if (state.isVictory) handleVictory(); else if (state.isGameOver) handleDefeat();
                     }
                 }
                 render(); updateInterface();
@@ -201,68 +200,52 @@ public class PCGameClient extends Application {
         stage.setTitle("NEON DEFENSE PRO"); stage.setScene(new Scene(rootPane, WIDTH, HEIGHT)); stage.show();
     }
 
+    private void drawAnimatedSprite(Image img, int totalFrames, double x, double y, double size, double speedModifier, boolean isFlipped) {
+        if (totalFrames <= 0) totalFrames = 1;
+        double frameWidth = img.getWidth() / totalFrames; double frameHeight = img.getHeight();
+        int currentFrame = (int) ((animationTime * speedModifier) % totalFrames);
+        double sourceX = currentFrame * frameWidth; double aspectRatio = frameWidth / frameHeight;
+        double drawW = size; double drawH = size / aspectRatio;
+        gc.save(); if (isFlipped) { gc.translate(x, y); gc.scale(-1, 1); gc.translate(-x, -y); }
+        gc.drawImage(img, sourceX, 0, frameWidth, frameHeight, x - drawW / 2, y - drawH / 2, drawW, drawH); gc.restore();
+    }
+
     private void sellTower(Tower t) {
-        int refund = (t.type.cost + (t.level-1)*50) / 2;
-        state.gold += refund;
-        state.towers.remove(t);
+        int refund = (t.type.cost + (t.level-1)*50) / 2; state.gold += refund; state.towers.remove(t);
         if (t.type == TowerType.BARRACKS) state.soldiers.removeIf(s -> s.owner == t);
-        playSound("coin");
-        damageTexts.add(new DamageText(t.x, t.y, "+$" + refund, Color.YELLOW));
-        state.message = "Đã bán " + t.type.name() + " (+$" + refund + ")";
-        state.isSellMode = false;
+        playSound("coin"); damageTexts.add(new DamageText(t.x, t.y, "+$" + refund, Color.YELLOW));
+        state.message = "Đã bán " + t.type.name() + " (+$" + refund + ")"; state.isSellMode = false;
         if (!state.isOfflineMode) network.sendAction(state.myRole, "SELL", t.x + "," + t.y);
     }
 
     private void repairCore() {
         if (state.gold >= 200 && state.baseHp < GameState.INITIAL_BASE_HP) {
-            state.gold -= 200;
-            int heal = Math.min(500, GameState.INITIAL_BASE_HP - state.baseHp);
-            state.baseHp += heal;
-            state.skillsUsed++;
-            playSound("build");
-            damageTexts.add(new DamageText(WIDTH-120, HEIGHT/2, "+" + heal + " HP", NEON_GREEN));
-            if (!state.isOfflineMode) {
-                network.sendAction(state.myRole, "SYNC_HP", String.valueOf(state.baseHp));
-                network.sendAction(state.myRole, "SYNC_GOLD", String.valueOf(state.gold));
-            }
-        } else if (state.baseHp >= GameState.INITIAL_BASE_HP) {
-            state.message = "NHÀ CHÍNH ĐANG ĐẦY MÁU!";
-        } else {
-            state.message = "KHÔNG ĐỦ TIỀN ĐỂ SỬA CHỮA!";
-        }
+            state.gold -= 200; int heal = Math.min(500, GameState.INITIAL_BASE_HP - state.baseHp);
+            state.baseHp += heal; state.skillsUsed++; playSound("build"); damageTexts.add(new DamageText(WIDTH-120, HEIGHT/2, "+" + heal + " HP", NEON_GREEN));
+            if (!state.isOfflineMode) { network.sendAction(state.myRole, "SYNC_HP", String.valueOf(state.baseHp)); network.sendAction(state.myRole, "SYNC_GOLD", String.valueOf(state.gold)); }
+        } else if (state.baseHp >= GameState.INITIAL_BASE_HP) state.message = "NHÀ CHÍNH ĐANG ĐẦY MÁU!";
+        else state.message = "KHÔNG ĐỦ TIỀN ĐỂ SỬA CHỮA!";
     }
 
-    // ================= MENUS =================
     private void showMainMenu() {
-        playBgm("HOME");
-        if (topHud != null) topHud.setVisible(false);
-        rootPane.getChildren().removeIf(node -> node instanceof VBox || (node instanceof HBox && node != topHud));
+        playBgm("HOME"); if (topHud != null) topHud.setVisible(false); rootPane.getChildren().removeIf(node -> node instanceof VBox || (node instanceof HBox && node != topHud));
         VBox menu = new VBox(20); menu.setAlignment(Pos.CENTER); menu.setStyle("-fx-background-color: rgba(0,0,0,0.95);");
         Label title = new Label("NEON KINGDOM"); title.setTextFill(NEON_CYAN); title.setFont(Font.font("Impact", 80)); title.setEffect(new DropShadow(20, NEON_CYAN));
-
-        Button btnStart = createStyledButton("▶ START GAME", NEON_GREEN); btnStart.setPrefWidth(300); btnStart.setPrefHeight(50);
-        btnStart.setOnAction(e -> showRoleSelection());
-
-        Button btnTutorial = createStyledButton("📖 HOW TO PLAY", NEON_ORANGE); btnTutorial.setPrefWidth(300); btnTutorial.setPrefHeight(50);
-        btnTutorial.setOnAction(e -> showTutorialMenu());
-
-        Button btnExit = createStyledButton("✖ EXIT GAME", NEON_RED); btnExit.setPrefWidth(300); btnExit.setPrefHeight(50);
-        btnExit.setOnAction(e -> Platform.exit());
-
+        Button btnStart = createStyledButton("▶ START GAME", NEON_GREEN); btnStart.setPrefWidth(300); btnStart.setPrefHeight(50); btnStart.setOnAction(e -> showRoleSelection());
+        Button btnTutorial = createStyledButton("📖 HOW TO PLAY", NEON_ORANGE); btnTutorial.setPrefWidth(300); btnTutorial.setPrefHeight(50); btnTutorial.setOnAction(e -> showTutorialMenu());
+        Button btnExit = createStyledButton("✖ EXIT GAME", NEON_RED); btnExit.setPrefWidth(300); btnExit.setPrefHeight(50); btnExit.setOnAction(e -> Platform.exit());
         menu.getChildren().addAll(title, btnStart, btnTutorial, btnExit); rootPane.getChildren().add(menu);
     }
 
     private void showTutorialMenu() {
         rootPane.getChildren().removeIf(node -> node instanceof VBox || (node instanceof HBox && node != topHud));
         VBox menu = new VBox(15); menu.setAlignment(Pos.CENTER); menu.setStyle("-fx-background-color: rgba(0,0,0,0.95);");
-        Label title = new Label("HƯỚNG DẪN CHƠI"); title.setTextFill(NEON_CYAN); title.setFont(Font.font("Impact", 50));
-
+        Label title = new Label("HƯỚNG DẪN CHƠI"); title.setTextFill(NEON_CYAN); title.setFont(Font.font("Arial", FontWeight.BOLD, 50));
         Label t1 = createHUDLabel("🎯 MỤC TIÊU: Bảo vệ Nhà Chính (Core) khỏi quái vật.", Color.WHITE);
         Label t2 = createHUDLabel("🏗️ XÂY TRỤ: Chọn trụ ở Shop bên dưới, click vào bản đồ để xây.", Color.WHITE);
         Label t3 = createHUDLabel("⭐ NÂNG CẤP: Click vào trụ đã xây để nâng cấp (Max Lv.3).", Color.WHITE);
         Label t4 = createHUDLabel("💰 BÁN TRỤ: Click nút SELL, sau đó click vào trụ để gỡ vốn 50%.", Color.WHITE);
         Label t5 = createHUDLabel("⚡ KỸ NĂNG: Mua Freeze/Bomb trong Shop khi nguy cấp.", Color.WHITE);
-
         Button btnBack = createStyledButton("<< BACK TO MENU", Color.GRAY); btnBack.setOnAction(e -> showMainMenu());
         menu.getChildren().addAll(title, t1, t2, t3, t4, t5, new Label(""), btnBack); rootPane.getChildren().add(menu);
     }
@@ -271,118 +254,121 @@ public class PCGameClient extends Application {
         rootPane.getChildren().removeIf(node -> node instanceof VBox || (node instanceof HBox && node != topHud));
         VBox menu = new VBox(20); menu.setAlignment(Pos.CENTER); menu.setStyle("-fx-background-color: rgba(0,0,0,0.9);");
         Label title = new Label("CHOOSE YOUR PATH"); title.setTextFill(NEON_CYAN); title.setFont(Font.font("Impact", 50));
-
         HBox offlineBox = new HBox(20); offlineBox.setAlignment(Pos.CENTER);
-        Button btnOffDef = createStyledButton("OFFLINE: DEFENDER", NEON_GREEN);
-        btnOffDef.setOnAction(e -> showDifficultySelection());
-        Button btnOffAtk = createStyledButton("OFFLINE: ATTACKER", NEON_ORANGE);
-        btnOffAtk.setOnAction(e -> { state.difficulty = "NORMAL"; startGame(true, "ATTACKER"); });
+        Button btnOffDef = createStyledButton("OFFLINE: DEFENDER", NEON_GREEN); btnOffDef.setOnAction(e -> showDifficultySelection());
+        Button btnOffAtk = createStyledButton("OFFLINE: ATTACKER", NEON_ORANGE); btnOffAtk.setOnAction(e -> { state.difficulty = "NORMAL"; startGame(true, "ATTACKER"); });
         offlineBox.getChildren().addAll(btnOffDef, btnOffAtk);
-
         HBox onlineBox = new HBox(20); onlineBox.setAlignment(Pos.CENTER);
-        Button btnDef = createStyledButton("ONLINE: DEFENDER", NEON_PURPLE);
-        btnDef.setOnAction(e -> { state.difficulty = "NORMAL"; startGame(false, "DEFENDER"); });
-        Button btnAtk = createStyledButton("ONLINE: ATTACKER", NEON_RED);
-        btnAtk.setOnAction(e -> { state.difficulty = "NORMAL"; startGame(false, "ATTACKER"); });
+        Button btnDef = createStyledButton("ONLINE: DEFENDER", NEON_PURPLE); btnDef.setOnAction(e -> { state.difficulty = "NORMAL"; startGame(false, "DEFENDER"); });
+        Button btnAtk = createStyledButton("ONLINE: ATTACKER", NEON_RED); btnAtk.setOnAction(e -> { state.difficulty = "NORMAL"; startGame(false, "ATTACKER"); });
         onlineBox.getChildren().addAll(btnDef, btnAtk);
-
         Button btnBack = createStyledButton("<< BACK TO MAIN MENU", Color.GRAY); btnBack.setOnAction(e -> showMainMenu());
-        menu.getChildren().addAll(title, new Label("--- SOLO PLAY ---"), offlineBox, new Label("--- MULTIPLAYER ---"), onlineBox, new Label(""), btnBack);
-        rootPane.getChildren().add(menu);
+        menu.getChildren().addAll(title, new Label("--- SOLO PLAY ---"), offlineBox, new Label("--- MULTIPLAYER ---"), onlineBox, new Label(""), btnBack); rootPane.getChildren().add(menu);
     }
 
     private void showDifficultySelection() {
         rootPane.getChildren().removeIf(node -> node instanceof VBox || (node instanceof HBox && node != topHud));
         VBox menu = new VBox(20); menu.setAlignment(Pos.CENTER); menu.setStyle("-fx-background-color: rgba(0,0,0,0.9);");
         Label title = new Label("SELECT DIFFICULTY"); title.setTextFill(NEON_CYAN); title.setFont(Font.font("Impact", 50));
-
         Button btnNorm = createStyledButton("NORMAL (800G, Easy Mobs)", NEON_GREEN); btnNorm.setPrefWidth(300);
         Button btnHard = createStyledButton("HARD (350G, Fast Mobs)", NEON_ORANGE); btnHard.setPrefWidth(300);
         Button btnEndless = createStyledButton("ENDLESS (Infinite Waves)", NEON_RED); btnEndless.setPrefWidth(300);
-
         btnNorm.setOnAction(e -> { state.difficulty = "NORMAL"; startGame(true, "DEFENDER"); });
         btnHard.setOnAction(e -> { state.difficulty = "HARD"; startGame(true, "DEFENDER"); });
         btnEndless.setOnAction(e -> { state.difficulty = "ENDLESS"; startGame(true, "DEFENDER"); });
-
-        Button btnBack = createStyledButton("<< BACK", Color.GRAY); btnBack.setPrefWidth(300);
-        btnBack.setOnAction(e -> showRoleSelection());
-
-        menu.getChildren().addAll(title, btnNorm, btnHard, btnEndless, new Label(""), btnBack);
-        rootPane.getChildren().add(menu);
+        Button btnBack = createStyledButton("<< BACK", Color.GRAY); btnBack.setPrefWidth(300); btnBack.setOnAction(e -> showRoleSelection());
+        menu.getChildren().addAll(title, btnNorm, btnHard, btnEndless, new Label(""), btnBack); rootPane.getChildren().add(menu);
     }
 
     private void startGame(boolean offline, String role) {
-        playBgm("GAME");
-        state.isOfflineMode = offline; state.myRole = role;
-        state.resetLevelData();
+        playBgm("GAME"); state.isOfflineMode = offline; state.myRole = role; state.resetLevelData();
         waveManager.initWaves(state.difficulty.equals("ENDLESS") ? 1 : 5);
         damageTexts.clear(); particles.clear(); screenShake = 0; bombFlashAlpha = 0;
+
+        myMonstersSpawned = 0; attackerSkillsUsed = 0;
+        lastSpeedUsed = 0; lastHealUsed = 0; lastCloneUsed = 0; lastComboUsed = 0; globalSpeedTimer = 0;
 
         rootPane.getChildren().removeIf(node -> node instanceof VBox || (node instanceof HBox && node != topHud));
         if (topHud != null) topHud.setVisible(true);
 
         if (!offline) {
             network.connect();
-            if ("ATTACKER".equals(role)) state.message = "Đang xin dữ liệu từ Host...";
-            else { generateMap(); new Timer().schedule(new TimerTask() { public void run() { Platform.runLater(()->startLevel()); }}, 1000); }
+            if ("ATTACKER".equals(role)) {
+                state.message = "Đang đồng bộ dữ liệu từ Host...";
+                Timer syncTimer = new Timer();
+                syncTimer.scheduleAtFixedRate(new TimerTask() {
+                    @Override
+                    public void run() {
+                        if (state.levelStarted) syncTimer.cancel();
+                        else network.sendAction("ATTACKER", "REQUEST_MAP", "map_pls");
+                    }
+                }, 1500, 2000);
+            } else { generateMap(); new Timer().schedule(new TimerTask() { public void run() { Platform.runLater(()->startLevel()); }}, 500); }
         } else { generateMap(); startLevel(); }
 
-        if ("ATTACKER".equals(role)) createBottomAttackerPanel();
-        else if ("DEFENDER".equals(role)) createBottomShop();
+        if ("ATTACKER".equals(role)) createBottomAttackerPanel(); else if ("DEFENDER".equals(role)) createBottomShop();
     }
 
-    private int getMaxHp(MonsterType type, int level) {
-        double multi = state.difficulty.equals("NORMAL") ? 0.05 : (state.difficulty.equals("HARD") ? 0.4 : 0.3);
-        return (int)(type.hp * (1 + (level - 1) * multi));
-    }
+    private int getMaxHp(MonsterType type, int level) { return (int)(type.hp * (1 + (level - 1) * (state.difficulty.equals("NORMAL") ? 0.05 : (state.difficulty.equals("HARD") ? 0.4 : 0.3)))); }
     private double getScaledSpeed(MonsterType type, int level) {
         double multi = state.difficulty.equals("NORMAL") ? 0.0 : (state.difficulty.equals("HARD") ? 0.1 : 0.05);
         return type.speed * (1 + (level - 1) * multi);
     }
-
     private void generateMap() {
         state.currentPath.clear();
-        int mapType = (state.currentLevel - 1) % 3;
-        if (mapType == 0) {
-            state.currentPath.addAll(Arrays.asList(new Point2D(99, 654), new Point2D(70, 592), new Point2D(35, 563), new Point2D(11, 518), new Point2D(5, 478), new Point2D(21, 428), new Point2D(75, 410), new Point2D(138, 417), new Point2D(186, 440), new Point2D(233, 472), new Point2D(293, 493), new Point2D(376, 494), new Point2D(438, 467), new Point2D(469, 412), new Point2D(448, 348), new Point2D(388, 317), new Point2D(329, 269), new Point2D(327, 214), new Point2D(390, 162), new Point2D(489, 151), new Point2D(590, 150), new Point2D(663, 172), new Point2D(693, 208), new Point2D(706, 256), new Point2D(689, 293), new Point2D(668, 340), new Point2D(640, 399), new Point2D(638, 443), new Point2D(707, 456), new Point2D(807, 442), new Point2D(879, 411), new Point2D(959, 412), new Point2D(1028, 469), new Point2D(1008, 550), new Point2D(948, 620), new Point2D(945, 664)));
-        } else if (mapType == 1) {
-            state.currentPath.addAll(Arrays.asList(new Point2D(0, 200), new Point2D(300, 200), new Point2D(500, 500), new Point2D(800, 500), new Point2D(950, 250), new Point2D(WIDTH, 250)));
-        } else {
-            state.currentPath.addAll(Arrays.asList(new Point2D(100, HEIGHT), new Point2D(100, 200), new Point2D(WIDTH/2, 100), new Point2D(WIDTH-150, 200), new Point2D(WIDTH-150, HEIGHT)));
-        }
+        state.currentPath.addAll(Arrays.asList(
+                new Point2D(99, 654), new Point2D(70, 592), new Point2D(35, 563), new Point2D(11, 518),
+                new Point2D(5, 478), new Point2D(21, 428), new Point2D(75, 410), new Point2D(138, 417),
+                new Point2D(186, 440), new Point2D(233, 472), new Point2D(293, 493), new Point2D(376, 494),
+                new Point2D(438, 467), new Point2D(469, 412), new Point2D(448, 348), new Point2D(388, 317),
+                new Point2D(329, 269), new Point2D(327, 214), new Point2D(390, 162), new Point2D(489, 151),
+                new Point2D(590, 150), new Point2D(663, 172), new Point2D(693, 208), new Point2D(706, 256),
+                new Point2D(689, 293), new Point2D(668, 340), new Point2D(640, 399), new Point2D(638, 443),
+                new Point2D(707, 456), new Point2D(807, 442), new Point2D(879, 411), new Point2D(959, 412),
+                new Point2D(1028, 469), new Point2D(1008, 550), new Point2D(948, 620), new Point2D(945, 664)
+        ));
     }
 
+    // --- FIX ĐỒNG BỘ: HOST TỰ ĐỘNG GỬI FULL DATA MỖI 1.5 GIÂY ---
     private void syncMapToAttacker() {
         if (state.isOfflineMode || state.currentPath.isEmpty()) return;
-        StringBuilder sb = new StringBuilder();
-        for(Point2D p : state.currentPath) sb.append((int)p.getX()).append(":").append((int)p.getY()).append(",");
-        network.sendAction(state.myRole, "SYNC_MAP", sb.toString());
+
+        StringBuilder sbMap = new StringBuilder();
+        for(Point2D p : state.currentPath) sbMap.append((int)p.getX()).append(":").append((int)p.getY()).append(",");
+        network.sendAction(state.myRole, "SYNC_MAP", sbMap.toString());
+
+        StringBuilder sbTow = new StringBuilder();
+        state.towers.forEach(t -> sbTow.append(t.type.name()).append(":").append((int)t.x).append(":").append((int)t.y).append(":").append(t.level).append("|"));
+        if (sbTow.length() > 0) network.sendAction(state.myRole, "FULL_SYNC_TOWERS", sbTow.toString());
+
+        // Bơm luôn danh sách quái cho đỡ bị lệch
+        StringBuilder sbMon = new StringBuilder();
+        state.monsters.forEach(m -> sbMon.append(m.type.name()).append(":").append((int)m.x).append(":").append((int)m.y).append(":").append((int)Math.max(0, m.hp)).append(":").append(m.pathIdx).append("|"));
+        if (sbMon.length() > 0) network.sendAction(state.myRole, "SYNC_MONSTERS", sbMon.toString());
+
         network.sendAction(state.myRole, "SYNC_HP", state.baseHp + "");
+        network.sendAction(state.myRole, "SYNC_GOLD", state.gold + "");
         network.sendAction(state.myRole, "NEW_LEVEL", state.currentLevel + "");
     }
 
     private void startLevel() { state.levelStarted = true; state.levelStartTime = System.currentTimeMillis(); }
 
     private double distToSegment(double px, double py, double x1, double y1, double x2, double y2) {
-        double l2 = Math.pow(x1 - x2, 2) + Math.pow(y1 - y2, 2);
-        if (l2 == 0) return Math.sqrt(Math.pow(px - x1, 2) + Math.pow(py - y1, 2));
+        double l2 = Math.pow(x1 - x2, 2) + Math.pow(y1 - y2, 2); if (l2 == 0) return Math.sqrt(Math.pow(px - x1, 2) + Math.pow(py - y1, 2));
         double t = Math.max(0, Math.min(1, ((px - x1) * (x2 - x1) + (py - y1) * (y2 - y1)) / l2));
         return Math.sqrt(Math.pow(px - (x1 + t * (x2 - x1)), 2) + Math.pow(py - (y1 + t * (y2 - y1)), 2));
     }
 
     private boolean isValidBuildSpot(double x, double y) {
-        for (Tower t : state.towers) { if (t.dist(x, y) > 0 && t.dist(x, y) < 40) return false; }
+        for (Tower t : state.towers) { if (t.dist(x, y) > 0 && t.dist(x, y) < 60) return false; }
         if (y > HEIGHT - 100) return false;
         if (state.selectedTower == TowerType.BARRACKS) return true;
         for (int i = 0; i < state.currentPath.size() - 1; i++) {
             Point2D p1 = state.currentPath.get(i), p2 = state.currentPath.get(i+1);
-            if (distToSegment(x, y, p1.getX(), p1.getY(), p2.getX(), p2.getY()) < 50) return false;
+            if (distToSegment(x, y, p1.getX(), p1.getY(), p2.getX(), p2.getY()) < 60) return false;
         }
         return true;
     }
-
-    // --- GAME LOGIC ---
-    private long lastRegenTime = 0;
 
     private void updateLogic(long now) {
         if (state.isVictory || state.isGameOver) return;
@@ -399,12 +385,26 @@ public class PCGameClient extends Application {
             }
         }
 
-        if (currentTime % 5000 < 20 && !state.isOfflineMode && "DEFENDER".equals(state.myRole)) {
-            StringBuilder sb = new StringBuilder();
-            state.towers.forEach(t -> sb.append(t.type.name()).append(":").append((int)t.x).append(":").append((int)t.y).append(":").append(t.level).append("|"));
-            network.sendAction(state.myRole, "FULL_SYNC_TOWERS", sb.toString());
-            network.sendAction(state.myRole, "SYNC_GOLD", String.valueOf(state.gold));
+        // --- CƠ CHẾ HEARTBEAT ÉP ĐỒNG BỘ SIÊU CHUẨN ---
+        if (currentTime - lastSyncTime > 1500 && !state.isOfflineMode && "DEFENDER".equals(state.myRole)) {
+            lastSyncTime = currentTime;
+            syncMapToAttacker();
         }
+
+        if (currentTime % 5000 < 50) {
+            for(Tower t : state.towers) {
+                if (t.type == TowerType.BARRACKS) {
+                    long count = state.soldiers.stream().filter(s -> s.owner == t).count();
+                    if (count < 1) spawnSoldiers(t);
+                }
+            }
+        }
+
+        state.projectiles.removeIf(p -> {
+            if(p.c.equals(TowerType.MAGE.color)) p.life -= 0.15;
+            else p.life -= 0.05;
+            return p.life <= 0;
+        });
 
         damageTexts.removeIf(dt -> { dt.y -= 0.5; dt.life -= 0.02; return dt.life <= 0; });
         particles.removeIf(p -> { if(p.isRipple) p.size += 2; else { p.x += p.vx; p.y += p.vy; } p.life -= 0.02; return p.life <= 0; });
@@ -414,14 +414,15 @@ public class PCGameClient extends Application {
         if (canRegen) lastRegenTime = currentTime;
 
         for(Soldier s : state.soldiers) {
-            if (s.engaging==null && s.hp<100 && canRegen) s.hp++;
-            if (s.engaging!=null && now-s.lastAtk > 1e9) {
+            int maxHp = 300 + (s.level - 1) * 150;
+            if (s.engaging==null && s.hp < maxHp && canRegen) s.hp += 5;
+            if (s.engaging!=null && currentTime - s.lastAtk > 1000) {
                 if(s.engaging.hp>0) {
-                    int dmg = 15 + (s.level*5); s.engaging.takeDamage(dmg, "PHYSICAL");
+                    int dmg = 25 + (s.level * 15); s.engaging.takeDamage(dmg, "PHYSICAL");
                     damageTexts.add(new DamageText(s.engaging.x, s.engaging.y, "-" + dmg, NEON_CYAN));
                     spawnExplosion(s.engaging.x, s.engaging.y, NEON_CYAN, 3);
                 }
-                s.lastAtk=now;
+                s.lastAtk = currentTime;
             }
             if (s.engaging!=null && s.engaging.hp<=0) s.engaging=null;
         }
@@ -441,23 +442,30 @@ public class PCGameClient extends Application {
             }
 
             double currentSpeed = m.frozenTimer > 0 ? m.currentSpeed * 0.1 : m.currentSpeed;
+            if (currentTime < globalSpeedTimer) {
+                currentSpeed *= 2.0;
+                if (Math.random() < 0.1) particles.add(new Particle(m.x, m.y + 20, Color.RED, false));
+            }
 
-            if (m.type == MonsterType.SHAMAN && Math.random() < 0.02) {
-                for(Monster ally : state.monsters) {
-                    if (ally != m && ally.dist(m.x, m.y) < 80) { ally.hp = Math.min(ally.hp + 20, ally.maxHp); damageTexts.add(new DamageText(ally.x, ally.y, "+20", NEON_GREEN)); }
+            // Để tránh lỗi Random tạo khác biệt giữa 2 máy, chỉ cho Host tính random
+            if (state.isOfflineMode || "DEFENDER".equals(state.myRole)) {
+                if (m.type == MonsterType.SHAMAN && Math.random() < 0.02) {
+                    for(Monster ally : state.monsters) {
+                        if (ally != m && ally.dist(m.x, m.y) < 80) { ally.hp = Math.min(ally.hp + 20, ally.maxHp); damageTexts.add(new DamageText(ally.x, ally.y, "+20", NEON_GREEN)); }
+                    }
+                }
+                if (m.type == MonsterType.BOSS && Math.random() < 0.005) {
+                    Monster minion = new Monster(MonsterType.GOBLIN, state.currentPath, state.currentLevel);
+                    minion.x = m.x + ThreadLocalRandom.current().nextInt(-20, 20); minion.y = m.y + ThreadLocalRandom.current().nextInt(-20, 20);
+                    minion.pathIdx = m.pathIdx; spawnedThisFrame.add(minion);
                 }
             }
-            if (m.type == MonsterType.BOSS && Math.random() < 0.005) {
-                Monster minion = new Monster(MonsterType.GOBLIN, state.currentPath, state.currentLevel);
-                minion.x = m.x + ThreadLocalRandom.current().nextInt(-20, 20); minion.y = m.y + ThreadLocalRandom.current().nextInt(-20, 20);
-                minion.pathIdx = m.pathIdx; spawnedThisFrame.add(minion);
-            }
 
-            for(Soldier s : state.soldiers) { if (s.engaging==null && m.engaging==null && m.dist(s.x,s.y)<30) { s.engaging=m; m.engaging=s; break; } }
+            for(Soldier s : state.soldiers) { if (s.engaging==null && m.engaging==null && m.dist(s.x,s.y)<50) { s.engaging=m; m.engaging=s; break; } }
             if (m.engaging!=null) {
                 if(m.engaging.hp<=0) m.engaging=null;
-                else if(now-m.lastAtk > 1e9) {
-                    m.engaging.hp-=25; m.lastAtk=now;
+                else if(currentTime - m.lastAtk > 1000) {
+                    m.engaging.hp-=25; m.lastAtk = currentTime;
                     damageTexts.add(new DamageText(m.engaging.x, m.engaging.y, "-25", NEON_RED));
                     spawnExplosion(m.engaging.x, m.engaging.y, NEON_RED, 3);
                 }
@@ -473,41 +481,34 @@ public class PCGameClient extends Application {
             if(m.finished) {
                 if (state.isOfflineMode || "DEFENDER".equals(state.myRole)) {
                     int damageToCore = (m.type == MonsterType.BOSS) ? 500 : 100;
-                    state.baseHp -= damageToCore;
-                    state.baseDamaged = true;
-                    playSound("base_hit");
-                    screenShake = (m.type == MonsterType.BOSS) ? 15 : 5;
+                    state.baseHp -= damageToCore; state.baseDamaged = true;
+                    playSound("base_hit"); screenShake = (m.type == MonsterType.BOSS) ? 15 : 5;
                     damageTexts.add(new DamageText(WIDTH-120, HEIGHT/2, "-" + damageToCore, NEON_RED));
                     spawnExplosion(WIDTH-120, HEIGHT/2, NEON_RED, 15);
 
                     if (state.baseHp <= 0) { state.baseHp = 0; handleDefeat(); }
                     if(!state.isOfflineMode) network.sendAction(state.myRole, "SYNC_HP", state.baseHp+"");
                 }
-                it.remove();
-                if (state.baseHp <= 0) return;
+                it.remove(); if (state.baseHp <= 0) return;
                 continue;
             }
             if(m.hp <= 0) {
-                state.gold += m.type.reward;
-                state.enemiesKilled++;
+                state.gold += m.type.reward; state.enemiesKilled++;
                 if (m.type == MonsterType.BOSS) state.bossesKilled++;
                 state.totalGoldEarned += m.type.reward;
                 damageTexts.add(new DamageText(m.x, m.y, "+$" + m.type.reward, Color.YELLOW));
                 spawnExplosion(m.x, m.y, m.type.color, 10);
-                playSound("coin");
-                it.remove();
+                playSound("coin"); it.remove();
             }
         }
         state.monsters.addAll(spawnedThisFrame);
 
-        state.projectiles.clear();
         for(Tower t : state.towers) {
             if(t.type==TowerType.BARRACKS) continue;
             if(t.target==null || t.target.hp<=0 || t.dist(t.target.x, t.target.y)>t.getRange()) t.target = state.monsters.stream().filter(m->t.dist(m.x,m.y)<=t.getRange()).min(Comparator.comparingDouble(m->t.dist(m.x,m.y))).orElse(null);
 
-            if(t.target!=null && now-t.lastAtk > t.getCooldown()*1e9) {
+            if(t.target!=null && currentTime - t.lastAtk > t.getCooldown() * 1000) {
                 state.projectiles.add(new Projectile(t.x, t.y-20, t.target.x, t.target.y, t.type.color));
-
                 if (t.type == TowerType.CANNON) {
                     playSound("cannon"); spawnExplosion(t.target.x, t.target.y, NEON_ORANGE, 12);
                     for(Monster m2 : state.monsters) {
@@ -527,12 +528,12 @@ public class PCGameClient extends Application {
                     if (Math.random() < 0.2) t.target.frozenTimer = 60;
                     else if (Math.random() < 0.4) t.target.burnTimer = 60;
                 }
-                t.lastAtk=now;
+                t.lastAtk=currentTime;
             }
         }
     }
 
-    private void updateAI(long now) {
+    private void updateAI() {
         if (!state.levelStarted) return;
         if ("ATTACKER".equals(state.myRole) && System.currentTimeMillis() - state.lastAiActionTime > 2500) {
             int pathIndex = ThreadLocalRandom.current().nextInt(state.currentPath.size() - 1);
@@ -587,7 +588,10 @@ public class PCGameClient extends Application {
     }
 
     private void spawnSoldiers(Tower t) {
-        state.soldiers.add(new Soldier(t.x+20, t.y, t)); state.soldiers.add(new Soldier(t.x-20, t.y, t)); state.soldiers.add(new Soldier(t.x, t.y+20, t));
+        Soldier bigBoy = new Soldier(t.x, t.y + 40, t);
+        bigBoy.hp = 300 + (t.level - 1) * 150;
+        bigBoy.level = t.level;
+        state.soldiers.add(bigBoy);
     }
 
     private void togglePause() {
@@ -618,11 +622,10 @@ public class PCGameClient extends Application {
         menuOverlay.getChildren().addAll(lbl, btnResume, btnRestart, btnQuit); rootPane.getChildren().add(menuOverlay);
     }
 
-    // --- CẢI TIẾN: BẢNG THỐNG KÊ CHI TIẾT & GHI FILE SCORE ---
+    // --- FIX: BẢNG THỐNG KÊ TÙY CHỈNH DÀNH CHO ATTACKER VÀ DEFENDER ---
     private void showEndGameMenu(boolean victory) {
         if (menuOverlay != null && rootPane.getChildren().contains(menuOverlay)) rootPane.getChildren().remove(menuOverlay);
 
-        // TÍNH TOÁN VÀ GHI HIGH SCORE
         state.survivalTimeSeconds = (System.currentTimeMillis() - state.levelStartTime) / 1000;
         boolean newRecord = false;
         if (state.difficulty.equals("ENDLESS") && state.currentLevel > bestEndlessWave) { bestEndlessWave = state.currentLevel; newRecord = true; }
@@ -637,15 +640,29 @@ public class PCGameClient extends Application {
         VBox statsBox = new VBox(10); statsBox.setAlignment(Pos.CENTER_LEFT);
         statsBox.setStyle("-fx-border-color: #00fff5; -fx-border-width: 2; -fx-padding: 20; -fx-background-color: rgba(0,0,0,0.5);");
         statsBox.setMaxWidth(400);
-        statsBox.getChildren().addAll(
-                createHUDLabel("📊 THỐNG KÊ TRẬN ĐẤU", NEON_CYAN),
-                createHUDLabel("⏱️ Thời gian sống sót: " + String.format("%02d:%02d", state.survivalTimeSeconds/60, state.survivalTimeSeconds%60), Color.WHITE),
-                createHUDLabel("🗡️ Kẻ địch đã diệt: " + state.enemiesKilled, Color.WHITE),
-                createHUDLabel("👹 Số Boss hạ gục: " + state.bossesKilled, Color.WHITE),
-                createHUDLabel("💰 Tổng vàng kiếm được: " + state.totalGoldEarned, Color.YELLOW),
-                createHUDLabel("⚡ Kỹ năng đã dùng: " + state.skillsUsed, NEON_ORANGE),
-                createHUDLabel("🌊 Wave kết thúc: " + state.currentLevel, NEON_ORANGE)
-        );
+
+        String timeStr = String.format("%02d:%02d", state.survivalTimeSeconds/60, state.survivalTimeSeconds%60);
+
+        // Thay đổi nội dung hiển thị tùy theo Phe
+        if ("ATTACKER".equals(state.myRole)) {
+            statsBox.getChildren().addAll(
+                    createHUDLabel("📊 THỐNG KÊ KẺ XÂM LĂNG", NEON_RED),
+                    createHUDLabel("⏱️ Thời gian chiến đấu: " + timeStr, Color.WHITE),
+                    createHUDLabel("😈 Quái vật đã thả: " + myMonstersSpawned, Color.WHITE),
+                    createHUDLabel("💀 Quái vật bị hạ: " + state.enemiesKilled, Color.WHITE),
+                    createHUDLabel("🔥 Phép thuật đã dùng: " + attackerSkillsUsed, NEON_ORANGE),
+                    createHUDLabel("👑 Cấp độ Quái: " + state.currentLevel, NEON_ORANGE)
+            );
+        } else {
+            statsBox.getChildren().addAll(
+                    createHUDLabel("📊 THỐNG KÊ PHÒNG THỦ", NEON_CYAN),
+                    createHUDLabel("⏱️ Thời gian sống sót: " + timeStr, Color.WHITE),
+                    createHUDLabel("🗡️ Kẻ địch đã diệt: " + state.enemiesKilled, Color.WHITE),
+                    createHUDLabel("👹 Số Boss hạ gục: " + state.bossesKilled, Color.WHITE),
+                    createHUDLabel("💰 Tổng vàng kiếm được: " + state.totalGoldEarned, Color.YELLOW),
+                    createHUDLabel("⚡ Kỹ năng đã dùng: " + state.skillsUsed, NEON_ORANGE)
+            );
+        }
 
         VBox scoreBox = new VBox(10); scoreBox.setAlignment(Pos.CENTER_LEFT);
         scoreBox.setStyle("-fx-border-color: #ff9a3c; -fx-border-width: 2; -fx-padding: 20; -fx-background-color: rgba(0,0,0,0.5);");
@@ -681,13 +698,14 @@ public class PCGameClient extends Application {
     private void returnToMainMenu() { state.levelStarted = false; state.resetLevelData(); showMainMenu(); }
 
     private void render() {
+        gc.clearRect(0, 0, WIDTH, HEIGHT);
+
         gc.save();
         if (screenShake > 0) {
             double dx = (Math.random() - 0.5) * screenShake; double dy = (Math.random() - 0.5) * screenShake; gc.translate(dx, dy);
         }
 
-        int mapIdx = ((state.currentLevel - 1) % 3) + 1;
-        Image bgImg = imageCache.get("map_" + mapIdx);
+        Image bgImg = imageCache.get("map_1");
         if(bgImg != null) gc.drawImage(bgImg, 0, 0, WIDTH, HEIGHT);
         else {
             gc.setFill(new LinearGradient(0, 0, 1, 1, true, CycleMethod.NO_CYCLE, new Stop(0, BG_DARK), new Stop(1, BG_LIGHT))); gc.fillRect(0, 0, WIDTH, HEIGHT);
@@ -703,13 +721,14 @@ public class PCGameClient extends Application {
         List<Monster> monsterSnapshot = new ArrayList<>(state.monsters);
 
         for(Tower t : towerSnapshot) drawTower(t);
-        for(Soldier s : state.soldiers) { drawSoldier(s.x, s.y); renderModernBar(s.x, s.y-25, s.hp, 100, 30, NEON_CYAN); }
+        for(Soldier s : state.soldiers) { drawSoldier(s); }
 
         for(Monster m : monsterSnapshot) {
-            drawMonster(m); double size = m.type==MonsterType.BOSS?60:40;
-            renderModernBar(m.x, m.y - size/2 - 15, m.hp, m.maxHp, size, NEON_RED);
-            if (m.frozenTimer > 0) { gc.setEffect(new DropShadow(10, NEON_CYAN)); gc.setStroke(NEON_CYAN); gc.setLineWidth(2); gc.strokeOval(m.x - size/2 - 5, m.y - size/2 - 5, size + 10, size + 10); gc.setEffect(null); }
-            else if (m.burnTimer > 0) { gc.setEffect(new DropShadow(10, Color.ORANGE)); gc.setStroke(Color.ORANGE); gc.setLineWidth(2); gc.strokeOval(m.x - size/2 - 5, m.y - size/2 - 5, size + 10, size + 10); gc.setEffect(null); }
+            drawMonster(m);
+            double barW = m.type==MonsterType.BOSS ? 120 : 70;
+            renderModernBar(m.x, m.y - barW/2 - 15, m.hp, m.maxHp, barW, NEON_RED);
+            if (m.frozenTimer > 0) { gc.setEffect(new DropShadow(10, NEON_CYAN)); gc.setStroke(NEON_CYAN); gc.setLineWidth(2); gc.strokeOval(m.x - barW/2 - 5, m.y - barW/2 - 5, barW + 10, barW + 10); gc.setEffect(null); }
+            else if (m.burnTimer > 0) { gc.setEffect(new DropShadow(10, Color.ORANGE)); gc.setStroke(Color.ORANGE); gc.setLineWidth(2); gc.strokeOval(m.x - barW/2 - 5, m.y - barW/2 - 5, barW + 10, barW + 10); gc.setEffect(null); }
         }
 
         for (Particle p : particles) {
@@ -721,14 +740,40 @@ public class PCGameClient extends Application {
 
         gc.setEffect(new Glow(1.0));
         for(Projectile p : state.projectiles) {
-            gc.setStroke(p.c);
-            if(p.c.equals(TowerType.MAGE.color)) { gc.setLineWidth(6); gc.strokeLine(p.sx, p.sy, p.ex, p.ey); gc.setStroke(Color.WHITE); gc.setLineWidth(2); gc.strokeLine(p.sx, p.sy, p.ex, p.ey); }
-            else if(p.c.equals(TowerType.CANNON.color)) { gc.setFill(p.c); gc.fillOval(p.sx + (p.ex-p.sx)*0.5 - 8, p.sy + (p.ey-p.sy)*0.5 - 8, 16, 16); }
-            else { gc.setLineWidth(3); gc.strokeLine(p.sx, p.sy, p.ex, p.ey); }
+            double progress = 1.0 - p.life;
+            if (progress > 1.0) progress = 1.0;
+            double currX = p.sx + (p.ex - p.sx) * progress;
+            double currY = p.sy + (p.ey - p.sy) * progress;
+
+            if(p.c.equals(TowerType.ARCHER.color)) {
+                Image arrowImg = imageCache.get("arrow");
+                if (arrowImg != null) {
+                    gc.save();
+                    double angle = Math.toDegrees(Math.atan2(p.ey - p.sy, p.ex - p.sx));
+                    gc.translate(currX, currY);
+                    gc.rotate(angle);
+                    gc.drawImage(arrowImg, -arrowImg.getWidth()/2, -arrowImg.getHeight()/2);
+                    gc.restore();
+                } else {
+                    gc.setFill(p.c); gc.fillOval(currX-5, currY-5, 10, 10);
+                }
+            }
+            else if(p.c.equals(TowerType.MAGE.color)) {
+                gc.setGlobalAlpha(p.life);
+                gc.setStroke(p.c); gc.setLineWidth(6); gc.strokeLine(p.sx, p.sy, p.ex, p.ey);
+                gc.setStroke(Color.WHITE); gc.setLineWidth(2); gc.strokeLine(p.sx, p.sy, p.ex, p.ey);
+                gc.setGlobalAlpha(1.0);
+            }
+            else if(p.c.equals(TowerType.CANNON.color)) {
+                gc.setFill(p.c); gc.fillOval(currX - 8, currY - 8, 16, 16);
+            }
+            else {
+                gc.setStroke(p.c); gc.setLineWidth(3); gc.strokeLine(p.sx, p.sy, p.ex, p.ey);
+            }
         }
         gc.setEffect(null);
 
-        gc.setFont(Font.font("Consolas", FontWeight.BOLD, 18));
+        gc.setFont(Font.font("Consolas", FontWeight.BOLD, 22));
         for (DamageText dt : damageTexts) {
             gc.setGlobalAlpha(dt.life); gc.setFill(dt.color); gc.setEffect(new DropShadow(3, Color.BLACK)); gc.fillText(dt.text, dt.x - 10, dt.y - 10); gc.setEffect(null);
         }
@@ -737,14 +782,14 @@ public class PCGameClient extends Application {
         boolean tooltipDrawn = false;
         if (mouseX >= 0 && mouseY >= 0 && !state.isPaused && !state.isGameOver && !state.isVictory && state.levelStarted) {
             for(Tower t : towerSnapshot) {
-                if (t.dist(mouseX, mouseY) < 35) {
+                if (t.dist(mouseX, mouseY) < 60) {
                     drawCanvasTooltip(mouseX, mouseY, " LV." + t.level + " " + t.type.name() + "\n DMG: " + t.getDamage() + "\n SPD: " + String.format("%.1f", t.getCooldown()) + "s\n RNG: " + t.getRange(), NEON_CYAN);
                     tooltipDrawn = true; break;
                 }
             }
             if (!tooltipDrawn) {
                 for(Monster m : monsterSnapshot) {
-                    if (m.dist(mouseX, mouseY) < 30) {
+                    if (m.dist(mouseX, mouseY) < 50) {
                         drawCanvasTooltip(mouseX, mouseY, " " + m.type.name() + "\n HP:  " + Math.max(0, m.hp) + "/" + m.maxHp + "\n SPD: " + String.format("%.1f", m.currentSpeed), NEON_RED);
                         tooltipDrawn = true; break;
                     }
@@ -752,7 +797,7 @@ public class PCGameClient extends Application {
             }
 
             if (!tooltipDrawn && "DEFENDER".equals(state.myRole)) {
-                Tower existing = towerSnapshot.stream().filter(t -> t.dist(mouseX, mouseY) < 40).findFirst().orElse(null);
+                Tower existing = towerSnapshot.stream().filter(t -> t.dist(mouseX, mouseY) < 60).findFirst().orElse(null);
                 if (existing != null) {
                     gc.setStroke(Color.rgb(255, 255, 0, 0.5)); gc.setLineWidth(2); gc.strokeOval(existing.x - existing.getRange(), existing.y - existing.getRange(), existing.getRange() * 2, existing.getRange() * 2);
                 } else if (!state.isSellMode) {
@@ -762,7 +807,19 @@ public class PCGameClient extends Application {
                     gc.setStroke(previewColor); gc.setLineWidth(2); gc.strokeOval(mouseX - state.selectedTower.range, mouseY - state.selectedTower.range, state.selectedTower.range * 2, state.selectedTower.range * 2);
 
                     Image previewImg = imageCache.get("tower_" + state.selectedTower.name().toLowerCase());
-                    if (previewImg != null) { gc.setGlobalAlpha(0.5); gc.drawImage(previewImg, mouseX - 30, mouseY - 40, 60, 80); gc.setGlobalAlpha(1.0); }
+                    if (previewImg != null) {
+                        gc.setGlobalAlpha(0.5);
+                        if (previewImg.getWidth() > previewImg.getHeight() * 1.5) {
+                            int frames = spriteFrames.getOrDefault("tower_" + state.selectedTower.name().toLowerCase(), 1);
+                            if(frames < 1) frames = 1;
+                            double sw = previewImg.getWidth() / frames;
+                            double sh = previewImg.getHeight();
+                            gc.drawImage(previewImg, 0, 0, sw, sh, mouseX - 60, mouseY - 120, 120, 160);
+                        } else {
+                            gc.drawImage(previewImg, mouseX - 60, mouseY - 120, 120, 160);
+                        }
+                        gc.setGlobalAlpha(1.0);
+                    }
                     else { gc.setFill(previewColor); gc.fillOval(mouseX-25, mouseY-20, 50, 30); }
                 }
             }
@@ -799,36 +856,90 @@ public class PCGameClient extends Application {
 
     private void drawTower(Tower t) {
         double x = t.x, y = t.y;
-        Image img = imageCache.get("tower_" + t.type.name().toLowerCase());
+        long now = System.currentTimeMillis();
 
-        if (System.currentTimeMillis() - t.lastAtk < 100) gc.setEffect(new Glow(0.8));
-        else gc.setEffect(new DropShadow(15, t.type.color));
+        double attackDurationMs = t.getCooldown() * 1000 * 0.6;
+        long timeSinceAtk = now - t.lastAtk;
+        boolean isShooting = (timeSinceAtk < attackDurationMs);
+
+        String towerNameStr = t.type.name().toLowerCase();
+        String imageKey = isShooting ? (towerNameStr + "_shoot") : ("tower_" + towerNameStr);
+
+        Image img = imageCache.get(imageKey);
+
+        if (img == null) {
+            img = imageCache.get("tower_" + towerNameStr);
+            imageKey = "tower_" + towerNameStr;
+        }
 
         if (img != null) {
-            gc.drawImage(img, x - 30, y - 40, 60, 80);
-            gc.setEffect(null);
+            double tw = 120, th = 160;
+
+            int frames = spriteFrames.getOrDefault(imageKey, 1);
+            if(frames < 1) frames = 1;
+
+            double sw = img.getWidth() / frames;
+            double sh = img.getHeight();
+
+            int frameIdx = 0;
+            if (frames > 1) {
+                if (isShooting && imageKey.endsWith("_shoot")) {
+                    frameIdx = (int) ((timeSinceAtk / attackDurationMs) * frames);
+                    if (frameIdx >= frames) frameIdx = frames - 1;
+                } else {
+                    frameIdx = (int) (animationTime * 2) % frames;
+                }
+            }
+
+            boolean flip = t.target != null && t.target.x < t.x;
+
+            gc.save();
+            if (flip) {
+                gc.translate(x, y);
+                gc.scale(-1, 1);
+                gc.translate(-x, -y);
+            }
+            gc.drawImage(img, frameIdx * sw, 0, sw, sh, x - tw/2, y - th + 40, tw, th);
+            gc.restore();
+
             gc.setFill(Color.WHITE); gc.setFont(Font.font("Consolas", FontWeight.BOLD, 14)); gc.fillText("Lv." + t.level, x-15, y+20);
             return;
         }
 
         gc.setFill(Color.web("#222")); gc.fillOval(x-25, y-20, 50, 30); gc.setFill(t.type.color.darker()); gc.fillRect(x-20, y-25, 40, 15);
-        switch (t.type) {
-            case ARCHER: gc.setFill(new LinearGradient(0,0,1,0, true, CycleMethod.NO_CYCLE, new Stop(0, t.type.color), new Stop(1, t.type.color.brighter()))); gc.fillRect(x-10, y-55, 20, 40); gc.setStroke(Color.WHITE); gc.setLineWidth(3); gc.strokeArc(x-20, y-65, 40, 30, 0, 180, ArcType.OPEN); break;
-            case MAGE: gc.setFill(t.type.color.darker()); gc.fillPolygon(new double[]{x-15, x+15, x}, new double[]{y-10, y-10, y-60}, 3); gc.setFill(t.type.color); gc.fillOval(x-12, y-72 + Math.sin(animationTime*2)*5, 24, 24); break;
-            case BARRACKS: gc.setFill(t.type.color.darker()); gc.fillRect(x-25, y-30, 50, 25); gc.setFill(t.type.color); gc.fillArc(x-20, y-45, 40, 30, 0, 180, ArcType.ROUND); gc.setFill(Color.BLACK); gc.fillRect(x-8, y-25, 16, 15); break;
-            case CANNON: gc.setFill(t.type.color.darker()); gc.fillRect(x-15, y-40, 30, 20); gc.setFill(t.type.color); gc.fillOval(x-12, y-45, 24, 24); gc.setStroke(Color.BLACK); gc.setLineWidth(6); gc.strokeLine(x, y-35, x+15, y-50); break;
-        }
-        gc.setEffect(null); gc.setFill(Color.WHITE); gc.setFont(Font.font("Consolas", FontWeight.BOLD, 12)); gc.fillText("Lv." + t.level, x-12, y+5);
+        gc.setFill(Color.WHITE); gc.setFont(Font.font("Consolas", FontWeight.BOLD, 12)); gc.fillText("Lv." + t.level, x-12, y+5);
     }
 
     private void drawMonster(Monster m) {
         double x = m.x, y = m.y;
         Image img = imageCache.get("monster_" + m.type.name().toLowerCase());
+
         if (img != null) {
-            double size = m.type == MonsterType.BOSS ? 80 : 40;
-            gc.drawImage(img, x - size/2, y - size/2, size, size);
+            double size = m.type == MonsterType.BOSS ? 160 : 100;
+            int frames = spriteFrames.getOrDefault("monster_" + m.type.name().toLowerCase(), 1);
+            if(frames < 1) frames = 1;
+
+            if (frames > 1) {
+                double sw = img.getWidth() / frames;
+                double sh = img.getHeight();
+                int frameIdx = (int) (animationTime * m.currentSpeed * 3) % frames;
+
+                boolean flip = false;
+                if (m.pathIdx < state.currentPath.size() - 1) {
+                    Point2D next = state.currentPath.get(m.pathIdx + 1);
+                    flip = next.getX() < m.x;
+                }
+
+                gc.save();
+                if (flip) { gc.translate(x, y); gc.scale(-1, 1); gc.translate(-x, -y); }
+                gc.drawImage(img, frameIdx * sw, 0, sw, sh, x - size/2, y - size/2, size, size);
+                gc.restore();
+            } else {
+                gc.drawImage(img, x - size/2, y - size/2, size, size);
+            }
             return;
         }
+
         Color c = m.type.color;
         switch (m.type) {
             case GOBLIN: gc.setFill(c); gc.fillOval(x-15, y-15, 30, 30); gc.fillPolygon(new double[]{x-15, x-25, x-15}, new double[]{y-5, y-15, y-25}, 3); gc.fillPolygon(new double[]{x+15, x+25, x+15}, new double[]{y-5, y-15, y-25}, 3); break;
@@ -838,15 +949,51 @@ public class PCGameClient extends Application {
         }
     }
 
-    private void drawSoldier(double x, double y) {
-        gc.setFill(NEON_CYAN.darker()); gc.fillArc(x-10, y-15, 20, 20, 0, 180, ArcType.ROUND); gc.setFill(NEON_CYAN); gc.fillRect(x-12, y-5, 24, 15); gc.setStroke(Color.WHITE); gc.setLineWidth(2); gc.strokeLine(x+5, y-10, x+15, y+5);
+    private void drawSoldier(Soldier s) {
+        double x = s.x, y = s.y;
+        Image img = imageCache.get("soldier");
+
+        if (img != null) {
+            double size = 90;
+            int frames = spriteFrames.getOrDefault("soldier", 1);
+            if (frames < 1) frames = 1;
+
+            if (frames > 1) {
+                double sw = img.getWidth() / frames;
+                double sh = img.getHeight();
+
+                int frameIdx = 0;
+                if (s.engaging != null) {
+                    frameIdx = (int) (animationTime * 8) % frames;
+                } else {
+                    frameIdx = (int) (animationTime * 2) % frames;
+                }
+
+                boolean flip = (s.engaging != null && s.engaging.x < s.x);
+                gc.save();
+                if (flip) { gc.translate(x, y); gc.scale(-1, 1); gc.translate(-x, -y); }
+                gc.drawImage(img, frameIdx * sw, 0, sw, sh, x - size/2, y - size/2, size, size);
+                gc.restore();
+            } else {
+                gc.drawImage(img, x - size/2, y - size/2, size, size);
+            }
+        } else {
+            gc.setFill(Color.rgb(0,0,0,0.5)); gc.fillOval(x-20, y-5, 40, 15);
+            gc.setFill(Color.SILVER); gc.fillRoundRect(x-15, y-25, 30, 25, 10, 10);
+            gc.setFill(Color.GOLD); gc.fillOval(x-10, y-40, 20, 20);
+            gc.setFill(Color.AQUA); gc.fillRect(x-25, y-20, 10, 25);
+            gc.setFill(Color.WHITE); gc.fillRect(x+15, y-30, 4, 30);
+        }
+
+        int maxHp = 300 + (s.level - 1) * 150;
+        renderModernBar(x, y - 50, s.hp, maxHp, 60, NEON_CYAN);
     }
+
     private void renderModernBar(double x, double y, int cur, int max, double w, Color c) {
         if (cur < 0) cur = 0;
         gc.setFill(Color.rgb(0,0,0,0.7)); gc.fillRoundRect(x-w/2, y, w, 5, 2, 2); gc.setFill(c); gc.fillRoundRect(x-w/2, y, w * Math.max(0, (double)cur/max), 5, 2, 2);
     }
 
-    // --- UI PANELS ---
     private void setupGameHUD() {
         topHud = new HBox(25); topHud.setPadding(new Insets(15));
         topHud.setAlignment(Pos.CENTER);
@@ -869,8 +1016,8 @@ public class PCGameClient extends Application {
         rootPane.getChildren().add(topHud);
     }
 
-    // --- CẢI TIẾN: GIAO DIỆN SHOP CÓ ICON & NÚT REPAIR/SELL ---
     private void createBottomShop() {
+        if (bottomPanel != null && rootPane.getChildren().contains(bottomPanel)) rootPane.getChildren().remove(bottomPanel);
         bottomPanel = new HBox(15); bottomPanel.setPadding(new Insets(10, 20, 10, 20)); bottomPanel.setAlignment(Pos.CENTER); bottomPanel.setMaxHeight(90);
         bottomPanel.setStyle("-fx-background-color: rgba(20,20,30,0.9); -fx-background-radius: 20 20 0 0; -fx-border-color: #00fff5; -fx-border-width: 2 2 0 2;");
         StackPane.setAlignment(bottomPanel, Pos.BOTTOM_CENTER);
@@ -882,7 +1029,12 @@ public class PCGameClient extends Application {
 
             Image icon = imageCache.get("tower_" + t.name().toLowerCase());
             if (icon != null) {
-                ImageView iv = new ImageView(icon); iv.setFitWidth(20); iv.setFitHeight(30);
+                ImageView iv = new ImageView(icon);
+                int frames = spriteFrames.getOrDefault("tower_" + t.name().toLowerCase(), 1);
+                if (frames > 1) {
+                    iv.setViewport(new Rectangle2D(0, 0, icon.getWidth() / frames, icon.getHeight()));
+                }
+                iv.setFitWidth(20); iv.setFitHeight(30);
                 b.setGraphic(iv); b.setContentDisplay(ContentDisplay.LEFT);
             }
 
@@ -906,19 +1058,36 @@ public class PCGameClient extends Application {
     }
 
     private void createBottomAttackerPanel() {
-        bottomPanel = new HBox(20); bottomPanel.setPadding(new Insets(10, 20, 10, 20)); bottomPanel.setAlignment(Pos.CENTER); bottomPanel.setMaxHeight(80);
+        if (bottomPanel != null && rootPane.getChildren().contains(bottomPanel)) rootPane.getChildren().remove(bottomPanel);
+        bottomPanel = new HBox(10); bottomPanel.setPadding(new Insets(10, 15, 10, 15)); bottomPanel.setAlignment(Pos.CENTER); bottomPanel.setMaxHeight(90);
         bottomPanel.setStyle("-fx-background-color: rgba(20,20,30,0.9); -fx-background-radius: 20 20 0 0; -fx-border-color: #e94560; -fx-border-width: 2 2 0 2;");
         StackPane.setAlignment(bottomPanel, Pos.BOTTOM_CENTER);
-        Label lbl = new Label("UNITS"); lbl.setTextFill(NEON_RED); lbl.setFont(Font.font("Impact", 24)); bottomPanel.getChildren().add(lbl);
+
+        Label lbl = new Label("UNITS"); lbl.setTextFill(NEON_RED); lbl.setFont(Font.font("Impact", 20)); bottomPanel.getChildren().add(lbl);
+
         for(MonsterType t : MonsterType.values()) {
-            Button b = createStyledButton(t.name() + " (" + t.cooldown + "s)", t.color); b.setPrefWidth(140); b.setPrefHeight(40);
-
-            Tooltip tip = new Tooltip("HP: " + t.hp + "\nSpeed: " + t.speed + "\nReward: $" + t.reward);
-            tip.setShowDelay(Duration.millis(100)); tip.setFont(Font.font("Consolas", 14));
-            Tooltip.install(b, tip);
-
+            Button b = createStyledButton(t.name() + "\n(" + t.cooldown + "s)", t.color); b.setPrefWidth(100); b.setPrefHeight(60);
+            Image icon = imageCache.get("monster_" + t.name().toLowerCase());
+            if (icon != null) { ImageView iv = new ImageView(icon); int frames = spriteFrames.getOrDefault("monster_" + t.name().toLowerCase(), 1); if (frames > 1) { iv.setViewport(new Rectangle2D(0, 0, icon.getWidth() / frames, icon.getHeight())); } iv.setFitWidth(30); iv.setFitHeight(30); b.setGraphic(iv); b.setContentDisplay(ContentDisplay.TOP); }
+            Tooltip tip = new Tooltip("HP: " + t.hp + "\nSpeed: " + t.speed + "\nReward: $" + t.reward); tip.setShowDelay(Duration.millis(100)); tip.setFont(Font.font("Consolas", 14)); Tooltip.install(b, tip);
             b.setOnAction(e -> spawnMonster(t)); attackerButtons.put(t, b); bottomPanel.getChildren().add(b);
         }
+
+        Label lblSkills = new Label(" SPELLS"); lblSkills.setTextFill(NEON_ORANGE); lblSkills.setFont(Font.font("Impact", 20)); bottomPanel.getChildren().add(lblSkills);
+
+        btnSpeed = createStyledButton("⚡ HASTE", Color.YELLOW); btnSpeed.setPrefWidth(85); btnSpeed.setPrefHeight(60);
+        btnSpeed.setOnAction(e -> useAttackerSkill("SPEED", 15000));
+
+        btnHeal = createStyledButton("💖 HEAL", NEON_GREEN); btnHeal.setPrefWidth(85); btnHeal.setPrefHeight(60);
+        btnHeal.setOnAction(e -> useAttackerSkill("HEAL", 20000));
+
+        btnClone = createStyledButton("🥷 CLONE", NEON_CYAN); btnClone.setPrefWidth(85); btnClone.setPrefHeight(60);
+        btnClone.setOnAction(e -> useAttackerSkill("CLONE", 25000));
+
+        btnCombo = createStyledButton("⚔️ COMBO", NEON_PURPLE); btnCombo.setPrefWidth(85); btnCombo.setPrefHeight(60);
+        btnCombo.setOnAction(e -> useAttackerSkill("COMBO", 30000));
+
+        bottomPanel.getChildren().addAll(btnSpeed, btnHeal, btnClone, btnCombo);
         rootPane.getChildren().add(bottomPanel);
     }
 
@@ -928,7 +1097,7 @@ public class PCGameClient extends Application {
 
         if (state.isOfflineMode && "DEFENDER".equals(state.myRole)) {
             int currentWaveIdx = (waveManager.currentWave != null) ? waveManager.currentWave.waveIndex : state.totalWaves;
-            String waveStr = state.restTimeRemaining > 0 ? "REST: " + state.restTimeRemaining + "s" : "MAP " + state.currentLevel + " - WAVE " + currentWaveIdx + "/5";
+            String waveStr = state.restTimeRemaining > 0 ? "REST: " + state.restTimeRemaining + "s" : "MAP 1 - WAVE " + currentWaveIdx + "/5";
             lblTime.setText(waveStr);
             lblTime.setTextFill(state.restTimeRemaining > 0 ? NEON_ORANGE : NEON_GREEN);
         } else {
@@ -948,18 +1117,28 @@ public class PCGameClient extends Application {
 
         lblMessage.setText(state.message);
 
-        // HIGHLIGHT NÚT ĐANG CHỌN TRONG SHOP
         if ("DEFENDER".equals(state.myRole) && bottomPanel != null) {
             for (TowerType t : TowerType.values()) {
                 Button b = shopButtons.get(t);
                 if (b != null) {
-                    if (!state.isSellMode && state.selectedTower == t) b.setStyle("-fx-background-color:rgba(255,255,0,0.3); -fx-border-color:yellow; -fx-border-width:2; -fx-border-radius:10; -fx-text-fill:white; -fx-font-family:'Consolas'; -fx-font-weight:bold; -fx-font-size:12px;");
-                    else b.setStyle("-fx-background-color:rgba(0,0,0,0.5); -fx-border-color:" + String.format("#%02X%02X%02X", (int)(t.color.getRed()*255),(int)(t.color.getGreen()*255),(int)(t.color.getBlue()*255)) + "; -fx-border-width:2; -fx-border-radius:10; -fx-text-fill:white; -fx-font-family:'Consolas'; -fx-font-weight:bold; -fx-font-size:12px;");
+                    boolean isActive = (!state.isSellMode && state.selectedTower == t);
+                    String currentStyle = b.getStyle();
+                    if (isActive && !currentStyle.contains("rgba(255,255,0,0.3)")) {
+                        b.setStyle("-fx-background-color:rgba(255,255,0,0.3); -fx-border-color:yellow; -fx-border-width:2; -fx-border-radius:10; -fx-text-fill:white; -fx-font-family:'Consolas'; -fx-font-weight:bold; -fx-font-size:12px;");
+                    } else if (!isActive && !currentStyle.contains("rgba(0,0,0,0.5)")) {
+                        String hex = String.format("#%02X%02X%02X", (int)(t.color.getRed()*255),(int)(t.color.getGreen()*255),(int)(t.color.getBlue()*255));
+                        b.setStyle("-fx-background-color:rgba(0,0,0,0.5); -fx-border-color:" + hex + "; -fx-border-width:2; -fx-border-radius:10; -fx-text-fill:white; -fx-font-family:'Consolas'; -fx-font-weight:bold; -fx-font-size:12px;");
+                    }
                 }
             }
             if (btnSell != null) {
-                if (state.isSellMode) btnSell.setStyle("-fx-background-color:rgba(255,0,0,0.5); -fx-border-color:red; -fx-border-width:2; -fx-border-radius:10; -fx-text-fill:white; -fx-font-family:'Consolas'; -fx-font-weight:bold; -fx-font-size:13px;");
-                else btnSell.setStyle("-fx-background-color:rgba(0,0,0,0.5); -fx-border-color:gray; -fx-border-width:2; -fx-border-radius:10; -fx-text-fill:white; -fx-font-family:'Consolas'; -fx-font-weight:bold; -fx-font-size:13px;");
+                boolean isSell = state.isSellMode;
+                String currentStyle = btnSell.getStyle();
+                if (isSell && !currentStyle.contains("rgba(255,0,0,0.5)")) {
+                    btnSell.setStyle("-fx-background-color:rgba(255,0,0,0.5); -fx-border-color:red; -fx-border-width:2; -fx-border-radius:10; -fx-text-fill:white; -fx-font-family:'Consolas'; -fx-font-weight:bold; -fx-font-size:13px;");
+                } else if (!isSell && !currentStyle.contains("rgba(0,0,0,0.5)")) {
+                    btnSell.setStyle("-fx-background-color:rgba(0,0,0,0.5); -fx-border-color:gray; -fx-border-width:2; -fx-border-radius:10; -fx-text-fill:white; -fx-font-family:'Consolas'; -fx-font-weight:bold; -fx-font-size:13px;");
+                }
             }
         }
 
@@ -969,10 +1148,14 @@ public class PCGameClient extends Application {
                 Button btn = attackerButtons.get(t);
                 if (btn != null) {
                     long cooldownEnd = state.cooldowns.getOrDefault(t, 0L) + t.cooldown * 1000L;
-                    if (now < cooldownEnd) { btn.setText(t.name() + " (" + (cooldownEnd - now) / 1000 + "s)"); btn.setDisable(true); btn.setOpacity(0.5); }
-                    else { btn.setText(t.name() + " (" + t.cooldown + "s)"); btn.setDisable(false); btn.setOpacity(1.0); }
+                    if (now < cooldownEnd) { btn.setText(t.name() + "\n(" + (cooldownEnd - now) / 1000 + "s)"); btn.setDisable(true); btn.setOpacity(0.5); }
+                    else { btn.setText(t.name() + "\n(" + t.cooldown + "s)"); btn.setDisable(false); btn.setOpacity(1.0); }
                 }
             }
+            if (btnSpeed != null) { long cd = 15000 - (now - lastSpeedUsed); if (cd > 0) { btnSpeed.setText("⚡ HASTE\n(" + cd/1000 + "s)"); btnSpeed.setDisable(true); btnSpeed.setOpacity(0.5); } else { btnSpeed.setText("⚡ HASTE\n(READY)"); btnSpeed.setDisable(false); btnSpeed.setOpacity(1.0); } }
+            if (btnHeal != null) { long cd = 20000 - (now - lastHealUsed); if (cd > 0) { btnHeal.setText("💖 HEAL\n(" + cd/1000 + "s)"); btnHeal.setDisable(true); btnHeal.setOpacity(0.5); } else { btnHeal.setText("💖 HEAL\n(READY)"); btnHeal.setDisable(false); btnHeal.setOpacity(1.0); } }
+            if (btnClone != null) { long cd = 25000 - (now - lastCloneUsed); if (cd > 0) { btnClone.setText("🥷 CLONE\n(" + cd/1000 + "s)"); btnClone.setDisable(true); btnClone.setOpacity(0.5); } else { btnClone.setText("🥷 CLONE\n(READY)"); btnClone.setDisable(false); btnClone.setOpacity(1.0); } }
+            if (btnCombo != null) { long cd = 30000 - (now - lastComboUsed); if (cd > 0) { btnCombo.setText("⚔️ COMBO\n(" + cd/1000 + "s)"); btnCombo.setDisable(true); btnCombo.setOpacity(0.5); } else { btnCombo.setText("⚔️ COMBO\n(READY)"); btnCombo.setDisable(false); btnCombo.setOpacity(1.0); } }
         }
     }
 
@@ -986,7 +1169,6 @@ public class PCGameClient extends Application {
     }
     private Label createHUDLabel(String text, Color color) { Label l = new Label(text); l.setTextFill(color); l.setFont(Font.font("Consolas", FontWeight.BOLD, 16)); l.setEffect(new DropShadow(5, color)); return l; }
 
-    // --- NETWORK & SKILLS ---
     private void activateSkill(String skillName, int cost) {
         if (state.gold >= cost) {
             state.gold -= cost; state.skillsUsed++;
@@ -996,66 +1178,149 @@ public class PCGameClient extends Application {
         } else { state.message = "NOT ENOUGH GOLD FOR SKILL!"; }
     }
 
+    private void useAttackerSkill(String skill, long cooldown) {
+        long now = System.currentTimeMillis();
+        if (skill.equals("SPEED") && now - lastSpeedUsed > cooldown) { lastSpeedUsed = now; attackerSkillsUsed++; network.sendAction("ATTACKER", "ATTACKER_SKILL", "SPEED"); }
+        else if (skill.equals("HEAL") && now - lastHealUsed > cooldown) { lastHealUsed = now; attackerSkillsUsed++; network.sendAction("ATTACKER", "ATTACKER_SKILL", "HEAL"); }
+        else if (skill.equals("CLONE") && now - lastCloneUsed > cooldown) { lastCloneUsed = now; attackerSkillsUsed++; network.sendAction("ATTACKER", "ATTACKER_SKILL", "CLONE"); }
+        else if (skill.equals("COMBO") && now - lastComboUsed > cooldown) { lastComboUsed = now; attackerSkillsUsed++; network.sendAction("ATTACKER", "ATTACKER_SKILL", "COMBO"); }
+    }
+
     private void spawnMonster(MonsterType t) {
         long now = System.currentTimeMillis();
         if (state.isOfflineMode && "DEFENDER".equals(state.myRole)) { state.monsters.add(new Monster(t, state.currentPath, state.currentLevel)); return; }
         if(now - state.cooldowns.getOrDefault(t,0L) > t.cooldown*1000L) {
             state.cooldowns.put(t,now);
-            if (state.isOfflineMode) { Monster m = new Monster(t, state.currentPath, state.currentLevel); state.monsters.add(m); }
-            else network.sendAction(state.myRole, "SPAWN", t.name());
+            if (state.isOfflineMode) {
+                Monster m = new Monster(t, state.currentPath, state.currentLevel);
+                m.hp = getMaxHp(t, state.currentLevel);
+                state.monsters.add(m);
+            }
+            else { network.sendAction(state.myRole, "SPAWN", t.name()); myMonstersSpawned++; }
         }
     }
 
     private void processAction(GameAction a) {
-        try {
-            String type = a.getActionType(); String data = a.getData();
-            if (data == null || data.isEmpty()) return;
-            switch (type) {
-                case "REQUEST_MAP": if ("DEFENDER".equals(state.myRole)) syncMapToAttacker(); break;
-                case "SYNC_MAP":
-                    state.currentPath.clear(); state.monsters.clear(); state.towers.clear(); state.projectiles.clear(); state.soldiers.clear();
-                    for(String s : data.split(",")) { String[] xy = s.split(":"); if(xy.length==2) state.currentPath.add(new Point2D(Double.parseDouble(xy[0]), Double.parseDouble(xy[1]))); } break;
-                case "FULL_SYNC_TOWERS":
-                    if ("ATTACKER".equals(state.myRole)) {
-                        state.towers.clear();
-                        for (String tStr : data.split("\\|")) {
-                            String[] p = tStr.split(":");
-                            if (p.length == 4) {
-                                Tower tw = new Tower(TowerType.valueOf(p[0]), Double.parseDouble(p[1]), Double.parseDouble(p[2]));
-                                tw.level = Integer.parseInt(p[3]);
-                                state.towers.add(tw);
+        Platform.runLater(() -> {
+            try {
+                String type = a.getActionType(); String data = a.getData();
+                if (data == null || data.isEmpty()) return;
+                switch (type) {
+                    case "PLAYER_JOINED": if ("DEFENDER".equals(state.myRole)) syncMapToAttacker(); break;
+                    case "REQUEST_MAP": if ("DEFENDER".equals(state.myRole)) syncMapToAttacker(); break;
+                    case "SYNC_MAP":
+                        if (state.currentPath.isEmpty()) {
+                            for(String s : data.split(",")) {
+                                if(s.isEmpty()) continue;
+                                String[] xy = s.split(":");
+                                if(xy.length==2) state.currentPath.add(new Point2D(Double.parseDouble(xy[0]), Double.parseDouble(xy[1])));
+                            }
+                            state.levelStarted = true; state.levelStartTime = System.currentTimeMillis();
+                        }
+                        break;
+                    case "FULL_SYNC_TOWERS":
+                        if ("ATTACKER".equals(state.myRole)) {
+                            state.towers.clear();
+                            for (String tStr : data.split("\\|")) {
+                                if(tStr.isEmpty()) continue;
+                                String[] p = tStr.split(":");
+                                if (p.length == 4) {
+                                    Tower tw = new Tower(TowerType.valueOf(p[0]), Double.parseDouble(p[1]), Double.parseDouble(p[2]));
+                                    tw.level = Integer.parseInt(p[3]);
+                                    state.towers.add(tw);
+                                }
                             }
                         }
-                    }
-                    break;
-                case "SYNC_GOLD": state.gold = Integer.parseInt(data); break;
-                case "NEW_LEVEL": state.levelStarted = true; state.levelStartTime = System.currentTimeMillis(); break;
-                case "SPAWN":
-                    if(!state.currentPath.isEmpty()) { MonsterType mtype = MonsterType.valueOf(data); Monster m = new Monster(mtype, state.currentPath, state.currentLevel); state.monsters.add(m); } break;
-                case "BUILD":
-                    String[] bd = data.split(","); TowerType bt = TowerType.valueOf(bd[0]); double bx = Double.parseDouble(bd[1]), by = Double.parseDouble(bd[2]); Tower newT = new Tower(bt,bx,by); state.towers.add(newT); if(bt==TowerType.BARRACKS) spawnSoldiers(newT); playSound("build"); break;
-                case "UPGRADE":
-                    String[] ud = data.split(","); double ux = Double.parseDouble(ud[0]), uy = Double.parseDouble(ud[1]); state.towers.stream().filter(tow->tow.dist(ux,uy)<10).forEach(Tower::upgrade); playSound("build"); break;
-                case "REPLACE":
-                    String[] rd = data.split(","); TowerType rt = TowerType.valueOf(rd[0]); double rx = Double.parseDouble(rd[1]), ry = Double.parseDouble(rd[2]); Tower oldTower = state.towers.stream().filter(tow->tow.dist(rx,ry)<10).findFirst().orElse(null); if(oldTower!=null) { state.towers.remove(oldTower); if(oldTower.type==TowerType.BARRACKS) state.soldiers.removeIf(s->s.owner==oldTower); } Tower repT = new Tower(rt,rx,ry); state.towers.add(repT); if(rt==TowerType.BARRACKS) spawnSoldiers(repT); playSound("build"); break;
-                case "SYNC_HP": state.baseHp = Integer.parseInt(data); if(state.baseHp <= 0) { state.baseHp = 0; if ("DEFENDER".equals(state.myRole)) handleDefeat(); else if ("ATTACKER".equals(state.myRole)) handleVictory(); } break;
-                case "GAME_OVER": handleDefeat(); break;
-                case "VICTORY": handleVictory(); break;
-                case "SELL":
-                    String[] sd = data.split(","); double slx = Double.parseDouble(sd[0]), sly = Double.parseDouble(sd[1]);
-                    Tower sellTower = state.towers.stream().filter(tow->tow.dist(slx,sly)<10).findFirst().orElse(null);
-                    if(sellTower!=null) { state.towers.remove(sellTower); if(sellTower.type==TowerType.BARRACKS) state.soldiers.removeIf(s->s.owner==sellTower); playSound("coin"); }
-                    break;
-                case "SKILL":
-                    if (data.equals("FREEZE")) { state.monsters.forEach(m -> m.frozenTimer = 100); state.message = "FREEZE ACTIVATED!"; playSound("freeze"); }
-                    else if (data.equals("BOMB")) {
-                        bombFlashAlpha = 1.0; screenShake = 20; state.message = "BOMB ACTIVATED!"; playSound("bomb");
-                        state.monsters.forEach(m -> { m.takeDamage(500, "MAGIC"); damageTexts.add(new DamageText(m.x, m.y, "-500", Color.RED)); spawnExplosion(m.x, m.y, Color.RED, 15); });
-                    }
-                    break;
+                        break;
+                    case "SYNC_MONSTERS":
+                        if ("ATTACKER".equals(state.myRole)) {
+                            state.monsters.clear();
+                            for(String mStr : data.split("\\|")) {
+                                if(mStr.isEmpty()) continue;
+                                String[] p = mStr.split(":");
+                                if(p.length >= 5) {
+                                    try {
+                                        MonsterType mtype = MonsterType.valueOf(p[0]);
+                                        Monster m = new Monster(mtype, state.currentPath, state.currentLevel);
+                                        m.x = Double.parseDouble(p[1]); m.y = Double.parseDouble(p[2]); m.hp = Integer.parseInt(p[3]); m.pathIdx = Integer.parseInt(p[4]);
+                                        m.currentSpeed = getScaledSpeed(mtype, state.currentLevel);
+                                        state.monsters.add(m);
+                                    } catch(Exception ex) {}
+                                }
+                            }
+                        }
+                        break;
+                    case "SYNC_HP": state.baseHp = Integer.parseInt(data); if(state.baseHp <= 0) { state.baseHp = 0; if ("DEFENDER".equals(state.myRole)) handleDefeat(); else if ("ATTACKER".equals(state.myRole)) handleVictory(); } break;
+                    case "SYNC_GOLD": state.gold = Integer.parseInt(data); break;
+                    case "NEW_LEVEL": state.currentLevel = Integer.parseInt(data); state.levelStarted = true; break;
+                    case "SPAWN":
+                        if(!state.currentPath.isEmpty()) {
+                            MonsterType mtype = MonsterType.valueOf(data);
+                            Monster m = new Monster(mtype, state.currentPath, state.currentLevel);
+                            m.hp = getMaxHp(mtype, state.currentLevel);
+                            state.monsters.add(m);
+                        } break;
+                    case "BUILD":
+                        String[] bd = data.split(","); TowerType bt = TowerType.valueOf(bd[0]); double bx = Double.parseDouble(bd[1]), by = Double.parseDouble(bd[2]); Tower newT = new Tower(bt,bx,by); state.towers.add(newT); if(bt==TowerType.BARRACKS) spawnSoldiers(newT); playSound("build"); break;
+                    case "UPGRADE":
+                        String[] ud = data.split(","); double ux = Double.parseDouble(ud[0]), uy = Double.parseDouble(ud[1]); state.towers.stream().filter(tow->tow.dist(ux,uy)<10).forEach(Tower::upgrade); playSound("build"); break;
+                    case "REPLACE":
+                        String[] rd = data.split(","); TowerType rt = TowerType.valueOf(rd[0]); double rx = Double.parseDouble(rd[1]), ry = Double.parseDouble(rd[2]); Tower oldTower = state.towers.stream().filter(tow->tow.dist(rx,ry)<10).findFirst().orElse(null); if(oldTower!=null) { state.towers.remove(oldTower); if(oldTower.type==TowerType.BARRACKS) state.soldiers.removeIf(s->s.owner==oldTower); } Tower repT = new Tower(rt,rx,ry); state.towers.add(repT); if(rt==TowerType.BARRACKS) spawnSoldiers(repT); playSound("build"); break;
+                    case "GAME_OVER": handleDefeat(); break;
+                    case "VICTORY": handleVictory(); break;
+                    case "SELL":
+                        String[] sd = data.split(","); double slx = Double.parseDouble(sd[0]), sly = Double.parseDouble(sd[1]);
+                        Tower sellTower = state.towers.stream().filter(tow->tow.dist(slx,sly)<10).findFirst().orElse(null);
+                        if(sellTower!=null) { state.towers.remove(sellTower); if(sellTower.type==TowerType.BARRACKS) state.soldiers.removeIf(s->s.owner==sellTower); playSound("coin"); }
+                        break;
+                    case "SKILL":
+                        if (data.equals("FREEZE")) { state.monsters.forEach(m -> m.frozenTimer = 100); state.message = "FREEZE ACTIVATED!"; playSound("freeze"); }
+                        else if (data.equals("BOMB")) {
+                            bombFlashAlpha = 1.0; screenShake = 20; state.message = "BOMB ACTIVATED!"; playSound("bomb");
+                            state.monsters.forEach(m -> { m.takeDamage(500, "MAGIC"); damageTexts.add(new DamageText(m.x, m.y, "-500", Color.RED)); spawnExplosion(m.x, m.y, Color.RED, 15); });
+                        }
+                        break;
+                    case "ATTACKER_SKILL":
+                        if (data.equals("SPEED")) {
+                            globalSpeedTimer = System.currentTimeMillis() + 5000;
+                            state.message = "QUÁI VẬT NHẬN HASTE!! TỐC ĐỘ x2"; playSound("laser");
+                        }
+                        else if (data.equals("HEAL")) {
+                            state.message = "QUÁI VẬT ĐƯỢC HỒI MÁU!! (+500 HP)"; playSound("build");
+                            state.monsters.forEach(m -> {
+                                m.hp = Math.min(m.hp + 500, m.maxHp);
+                                damageTexts.add(new DamageText(m.x, m.y, "+500", NEON_GREEN));
+                                spawnExplosion(m.x, m.y, NEON_GREEN, 5);
+                            });
+                        }
+                        else if (data.equals("CLONE")) {
+                            state.message = "PHÂN THÂN CHI THUẬT!!"; playSound("bomb"); screenShake = 10;
+                            List<Monster> clones = new ArrayList<>();
+                            for(Monster m : state.monsters) {
+                                Monster clone = new Monster(m.type, state.currentPath, state.currentLevel);
+                                clone.x = m.x - ThreadLocalRandom.current().nextInt(20, 40);
+                                clone.y = m.y - ThreadLocalRandom.current().nextInt(20, 40);
+                                clone.pathIdx = m.pathIdx;
+                                clone.hp = m.hp;
+                                clones.add(clone);
+                                spawnExplosion(clone.x, clone.y, Color.WHITE, 10);
+                            }
+                            state.monsters.addAll(clones);
+                        }
+                        else if (data.equals("COMBO")) {
+                            state.message = "ĐỘI QUÂN HỦY DIỆT ĐÃ XUẤT HIỆN!!"; playSound("bomb"); screenShake = 15;
+                            if (state.currentPath.isEmpty()) break;
+                            Point2D start = state.currentPath.get(0);
+                            for(int i=0; i<3; i++) { Monster m = new Monster(MonsterType.GOBLIN, state.currentPath, state.currentLevel); m.x = start.getX() - i*30; m.y = start.getY() - i*20; m.hp = getMaxHp(MonsterType.GOBLIN, state.currentLevel); state.monsters.add(m); }
+                            for(int i=0; i<2; i++) { Monster m = new Monster(MonsterType.ORC, state.currentPath, state.currentLevel); m.x = start.getX() - 50 - i*30; m.y = start.getY() + 30; m.hp = getMaxHp(MonsterType.ORC, state.currentLevel); state.monsters.add(m); }
+                            Monster sh = new Monster(MonsterType.SHAMAN, state.currentPath, state.currentLevel); sh.x = start.getX() - 80; sh.y = start.getY(); sh.hp = getMaxHp(MonsterType.SHAMAN, state.currentLevel); state.monsters.add(sh);
+                            if ("ATTACKER".equals(state.myRole)) myMonstersSpawned += 6;
+                        }
+                        break;
+                }
+            } catch (Exception e) {
+                System.err.println("Gói tin lỗi từ role " + a.getRole() + ": " + e.getMessage());
             }
-        } catch (Exception e) {
-            System.err.println("Gói tin lỗi từ role " + a.getRole() + ": " + e.getMessage());
-        }
+        });
     }
 }
