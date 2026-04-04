@@ -5,7 +5,6 @@ public class GameAction {
     private String actionType;
     private String data;
 
-    // Bắt buộc phải có constructor rỗng để thư viện Jackson chuyển đổi JSON
     public GameAction() {
     }
 

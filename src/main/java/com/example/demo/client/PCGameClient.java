@@ -120,7 +120,7 @@ public class PCGameClient extends Application {
                 "tower_barracks",
                 "tower_cannon", "cannon_shoot",
                 "monster_goblin", "monster_orc", "monster_shaman", "monster_boss",
-                "base_core", "bg_neon", "map_1", "map_2", "map_3", "Arrow", "map_2", "map_3" };
+                "base_core", "bg_neon", "map_1", "map_2", "map_3", "Arrow" };
         spriteFrames.put("tower_mage", 6);
         spriteFrames.put("mage_shoot", 11);
         spriteFrames.put("tower_archer", 6);
@@ -134,7 +134,7 @@ public class PCGameClient extends Application {
         spriteFrames.put("monster_boss", 6);
         spriteFrames.put("base_core", 1);
         spriteFrames.put("bg_neon", 1);
-        spriteFrames.put("arrow", 1);
+        spriteFrames.put("Arrow", 1);
         for (String name : imgNames) {
             try {
                 Image img = new Image(getClass().getResourceAsStream("/static/images/" + name + ".png"));
@@ -662,7 +662,7 @@ public class PCGameClient extends Application {
         menuOverlay.getChildren().addAll(lbl, btnResume, btnRestart, btnQuit); rootPane.getChildren().add(menuOverlay);
     }
 
-    // --- CẢI TIẾN: BẢNG THỐNG KÊ CHI TIẾT & GHI FILE SCORE ---
+    // --- BẢNG THỐNG KÊ CHI TIẾT & GHI FILE SCORE ---
     private void showEndGameMenu(boolean victory) {
         if (menuOverlay != null && rootPane.getChildren().contains(menuOverlay)) rootPane.getChildren().remove(menuOverlay);
 
@@ -797,7 +797,7 @@ public class PCGameClient extends Application {
                 gc.save();
                 gc.translate(p.sx + (p.ex-p.sx)*0.5, p.sy + (p.ey-p.sy)*0.5);
                 gc.rotate(angle);
-                gc.drawImage(arrowImg, -20, -10, 40, 20); // Tăng size đạn cung
+                gc.drawImage(arrowImg, -20, -10, 40, 20);
                 gc.restore();
             } else if(p.c.equals(TowerType.MAGE.color)) {
                 gc.setLineWidth(6); gc.strokeLine(p.sx, p.sy, p.ex, p.ey);
@@ -881,11 +881,8 @@ public class PCGameClient extends Application {
     private void drawTower(Tower t) {
         double x = t.x, y = t.y;
         long now = System.currentTimeMillis();
-
-        // Fix: Hoạt ảnh bắn sẽ chiếm 60% thời gian của tốc độ bắn (Cooldown)
-        // Giúp hoạt ảnh luôn hiển thị đầy đủ dù bắn nhanh hay chậm
         double attackDurationMs = t.getCooldown() * 1000 * 0.6;
-        boolean isShooting = (now - t.lastAtk < attackDurationMs);
+        boolean isShooting = (now - t.lastAtk < attackDurationMs) && t.target != null;
 
         String stateStr = isShooting ? "shoot" : "idle";
         String towerNameStr = t.type.name().toLowerCase();
@@ -913,26 +910,14 @@ public class PCGameClient extends Application {
 
                 drawAnimatedSprite(img, frames, x, y - 20, towerSize, animSpeed, flip);
             } else {
-                gc.drawImage(img, x - towerSize/2, y - towerSize/2 - 10, towerSize, towerSize);
+                gc.drawImage(img, x - towerSize / 2, y - towerSize / 2 - 10, towerSize, towerSize);
             }
 
             gc.setFill(Color.WHITE);
             gc.setFont(Font.font("Consolas", FontWeight.BOLD, 14));
-            gc.fillText("Lv." + t.level, x-15, y+45);
+            gc.fillText("Lv." + t.level, x - 15, y + 45);
             return;
         }
-
-
-        // --- FALLBACK VẼ BẰNG CODE DỰ PHÒNG CHỐNG CRASH (BỎ GLOW) ---
-        gc.setFill(Color.web("#222")); gc.fillOval(x-25, y-20, 50, 30);
-        gc.setFill(t.type.color.darker()); gc.fillRect(x-20, y-25, 40, 15);
-        switch (t.type) {
-            case ARCHER: gc.setFill(new LinearGradient(0,0,1,0, true, CycleMethod.NO_CYCLE, new Stop(0, t.type.color), new Stop(1, t.type.color.brighter()))); gc.fillRect(x-10, y-55, 20, 40); gc.setStroke(Color.WHITE); gc.setLineWidth(3); gc.strokeArc(x-20, y-65, 40, 30, 0, 180, ArcType.OPEN); break;
-            case MAGE: gc.setFill(t.type.color.darker()); gc.fillPolygon(new double[]{x-15, x+15, x}, new double[]{y-10, y-10, y-60}, 3); gc.setFill(t.type.color); gc.fillOval(x-12, y-72 + Math.sin(animationTime*2)*5, 24, 24); break;
-            case BARRACKS: gc.setFill(t.type.color.darker()); gc.fillRect(x-25, y-30, 50, 25); gc.setFill(t.type.color); gc.fillArc(x-20, y-45, 40, 30, 0, 180, ArcType.ROUND); gc.setFill(Color.BLACK); gc.fillRect(x-8, y-25, 16, 15); break;
-            case CANNON: gc.setFill(t.type.color.darker()); gc.fillRect(x-15, y-40, 30, 20); gc.setFill(t.type.color); gc.fillOval(x-12, y-45, 24, 24); gc.setStroke(Color.BLACK); gc.setLineWidth(6); gc.strokeLine(x, y-35, x+15, y-50); break;
-        }
-        gc.setEffect(null); gc.setFill(Color.WHITE); gc.setFont(Font.font("Consolas", FontWeight.BOLD, 12)); gc.fillText("Lv." + t.level, x-12, y+5);
     }
 
     private void drawMonster(Monster m) {
