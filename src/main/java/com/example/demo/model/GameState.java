@@ -49,4 +49,5 @@ public class GameState {
         isGameOver = false; isVictory = false; isPaused = false; levelStarted = false;
         restTimeRemaining = 0; message = "Đang sẵn sàng..."; levelStartTime = System.currentTimeMillis();
     }
+
 }
